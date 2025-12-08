@@ -11,7 +11,7 @@
         </intent>
     </queries>
     <application
-        android:label="Achhafoods"
+        android:label="Achha e-mart"
         android:name="${applicationName}"
         android:icon="@mipmap/launcher_icon">
         <activity
