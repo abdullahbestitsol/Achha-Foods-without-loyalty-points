@@ -80,16 +80,16 @@ class _CustomDrawerState extends State<CustomDrawer> {
           ),
 
           // Home - Dynamic Text
-          _createDrawerItem(
-            icon: Icons.home,
-            text: dynamicCache.getSidebarHome()?? 'Home',
-            onTap: () {
-              Navigator.pop(context);
-              Navigator.push(context,
-                  MaterialPageRoute(builder: (context) => const HomePage()));
-            },
-          ),
-          _buildLightDivider(),
+          // _createDrawerItem(
+          //   icon: Icons.home,
+          //   text: dynamicCache.getSidebarHome()?? 'Home',
+          //   onTap: () {
+          //     Navigator.pop(context);
+          //     Navigator.push(context,
+          //         MaterialPageRoute(builder: (context) => const HomePage()));
+          //   },
+          // ),
+          // _buildLightDivider(),
 
           // Store - Dynamic Text
           _createDrawerItem(

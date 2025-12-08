@@ -29,24 +29,29 @@ class _WhatsAppFABState extends State<CustomWhatsAppFAB> {
   }
 
   Future<void> _openWhatsApp(BuildContext context) async {
-    // 1. Get the instance using Provider
     final dynamicCache = Provider.of<DynamicContentCache>(context, listen: false);
-
-    final String? contactNumber = dynamicCache.getContactUsNumber();
+    String? contactNumber = dynamicCache.getContactUsNumber();
 
     if (contactNumber == null || contactNumber.isEmpty) {
-      // Use ScaffoldMessenger to show a helpful message
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('WhatsApp number not available')),
       );
       return;
     }
 
+    // CLEANUP: Remove any non-digit characters (like +, -, spaces)
+    // This turns "+92 317-3179903" into "923173179903"
+    contactNumber = contactNumber.replaceAll(RegExp(r'[^\d]'), '');
+
     final whatsappUrl = Uri.parse('https://wa.me/$contactNumber');
 
-    if (await canLaunchUrl(whatsappUrl)) {
-      await launchUrl(whatsappUrl, mode: LaunchMode.externalApplication);
-    } else {
+    // LaunchMode.externalApplication is correct for WhatsApp
+    try {
+      if (!await launchUrl(whatsappUrl, mode: LaunchMode.externalApplication)) {
+        throw 'Could not launch $whatsappUrl';
+      }
+    } catch (e) {
+      debugPrint(e.toString());
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Could not open WhatsApp')),
       );
