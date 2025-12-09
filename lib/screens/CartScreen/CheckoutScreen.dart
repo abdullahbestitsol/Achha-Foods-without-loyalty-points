@@ -569,8 +569,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           value!.isEmpty ? "Phone is required" : null,
                         ),
                         const SizedBox(height: 12),
-
-                        // Address Dropdown and Field
                         if (_isLoggedIn && _savedAddresses.isNotEmpty)
                           Padding(
                             padding: const EdgeInsets.only(bottom: 12.0),
@@ -585,7 +583,19 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                               items: [
                                 ..._savedAddresses.map((addr) => DropdownMenuItem(
                                   value: addr['label'],
-                                  child: Text('${addr['label']!}: ${addr['address']!}', overflow: TextOverflow.ellipsis),
+                                  // --- START FIX ---
+                                  child: SizedBox(
+                                    // Constrain the width of the Text widget within the dropdown item
+                                    // The constraint should be the width of the screen minus padding.
+                                    // Using a FractionallySizedBox set to 0.8 or 0.9 of the available width is safer.
+                                    // Using MediaQuery.of(context).size.width * 0.75 as a safe constraint.
+                                    width: MediaQuery.of(context).size.width * 0.75,
+                                    child: Text(
+                                        '${addr['label']!}: ${addr['address']!}',
+                                        overflow: TextOverflow.ellipsis // Ellipsis will now correctly apply
+                                    ),
+                                  ),
+                                  // --- END FIX ---
                                 )),
                                 const DropdownMenuItem(
                                   value: 'new_address_option',
@@ -608,6 +618,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                             ),
                           ),
 
+// The TextFormField below this is now correct and should not cause overflow.
                         TextFormField(
                           controller: _addressController,
                           decoration: InputDecoration(
@@ -619,9 +630,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           validator: (value) =>
                           value!.isEmpty ? "Address is required" : null,
                           enabled: _selectedAddressKey == 'new_address_option' || !_isLoggedIn || _savedAddresses.isEmpty,
+                          keyboardType: TextInputType.streetAddress,
                         ),
                         const SizedBox(height: 20),
-
                         // --- Order Note field ---
                         TextFormField(
                           controller: _noteController,

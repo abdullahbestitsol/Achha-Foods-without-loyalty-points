@@ -9,6 +9,62 @@ import 'package:shared_preferences/shared_preferences.dart'; // REQUIRED for tok
 const int maxRetries = 3;
 
 class LaravelApiService {
+
+  static Future<Map<String, dynamic>> deleteAddress({
+    required String email,
+    required String label,
+  }) async {
+    // 1. Define URL and Request Body
+    final url = Uri.parse('$localurl/api/delete-address'); // Use your actual base URL
+
+    final Map<String, String> requestBody = {
+      'email': email,
+      'address_label': label, // Matches the backend's required parameter
+    };
+
+    if (kDebugMode) {
+      print('--- DELETE ADDRESS API CALL ---');
+      print('URL: $url');
+      print('Request Body: ${jsonEncode(requestBody)}');
+    }
+
+    try {
+      // 2. Make the POST request
+      final response = await http.post(
+        url,
+        headers: <String, String>{
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: jsonEncode(requestBody),
+      );
+
+      // 3. Process Response
+      final responseBody = json.decode(response.body);
+
+      if (kDebugMode) {
+        print('Response Status Code: ${response.statusCode}');
+        print('Response Body: ${response.body}');
+        print('-----------------------------');
+      }
+
+      // Check for 200 OK status AND backend 'status' field being true
+      if (response.statusCode == 200 && responseBody['status'] == true) {
+        // Return the updated user data
+        return responseBody['data'];
+      } else {
+        // Handle unsuccessful response (e.g., status code != 200 or 'status' is false)
+        final errorMessage = responseBody['message'] ?? 'Failed to delete address. Server error.';
+        throw Exception(errorMessage);
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('API Catch Error: $e');
+      }
+      // Re-throw the exception so the UI layer can handle it (show a Toast)
+      rethrow;
+    }
+  }
   static Future<Map<String, dynamic>> updateProfile({
     required String email,
     String? firstName,

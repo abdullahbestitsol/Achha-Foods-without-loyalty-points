@@ -745,7 +745,8 @@ class _MainScreenState extends State<MainScreen> {
                   (kToolbarHeight + (MediaQuery.of(context).padding.top) + kBottomNavigationBarHeight),
             ),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
+              // ADDED BOTTOM PADDING to prevent 1.00 pixel overflow
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 25), // Increased bottom padding to 25
               child: _buildContent(),
             ),
           ),

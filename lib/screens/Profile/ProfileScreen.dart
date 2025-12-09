@@ -259,6 +259,70 @@ class _ProfileDetailsScreenState extends State<ProfileDetailsScreen> {
     );
   }
 
+  // Add this function within the _ProfileDetailsScreenState class
+
+  void _showEditAddressModal(Map<String, dynamic> existingAddress) {
+    final TextEditingController labelController =
+    TextEditingController(text: existingAddress['label']);
+    final TextEditingController addressController =
+    TextEditingController(text: existingAddress['address']);
+
+    // We need to keep track of the original label to handle updates correctly
+    final String originalLabel = existingAddress['label'];
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Edit Address'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              // Label is editable, but new label will overwrite old one on API update
+              _buildTextField(
+                controller: labelController,
+                label: 'Address Label (e.g., Home, Work)',
+                icon: Icons.label_important_outline,
+              ),
+              const SizedBox(height: 15),
+              _buildTextField(
+                controller: addressController,
+                label: 'Full Address',
+                icon: Icons.location_on_outlined,
+                maxLines: 3,
+              ),
+            ],
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+            ElevatedButton(
+              child: const Text('Save Changes'),
+              onPressed: () async {
+                final newLabel = labelController.text.trim();
+                final newAddress = addressController.text.trim();
+
+                if (newLabel.isEmpty || newAddress.isEmpty) {
+                  Fluttertoast.showToast(msg: 'All fields are required.');
+                  return;
+                }
+
+                Navigator.of(context).pop();
+
+                // IMPORTANT: The Laravel API must support updating an existing address.
+                // Assuming that if a label is updated, it will overwrite the old one,
+                // or if the label remains the same, it updates the address content.
+                await _updateAddressViaApi(newLabel, newAddress);
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> _updateAddressViaApi(String label, String address) async {
     setState(() => isUpdating = true);
 
@@ -300,6 +364,36 @@ class _ProfileDetailsScreenState extends State<ProfileDetailsScreen> {
         setState(() => isUpdating = false);
       }
     }
+  }
+
+  // Add this function within the _ProfileDetailsScreenState class
+
+  void _showDeleteConfirmation(String label) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Confirm Deletion'),
+          content: Text('Are you sure you want to delete the address labeled "$label"?'),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+              ),
+              child: const Text('Delete', style: TextStyle(color: Colors.white)),
+              onPressed: () {
+                Navigator.of(context).pop();
+                _deleteAddressViaApi(label);
+              },
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _updateProfile() async {
@@ -431,7 +525,7 @@ class _ProfileDetailsScreenState extends State<ProfileDetailsScreen> {
 
           Fluttertoast.showToast(
             msg:
-            '✅ Profile updated successfully! ${changingPassword ? 'Password synced across both systems.' : ''}',
+            '✅ Profile updated successfully! ${changingPassword ? '' : ''}',
             backgroundColor: Colors.green,
             textColor: Colors.white,
           );
@@ -779,18 +873,24 @@ class _ProfileDetailsScreenState extends State<ProfileDetailsScreen> {
   }
 
   // Existing Helper Widgets (Unchanged)
+  // Replace your existing _buildAddressCard with this updated version:
   Widget _buildAddressCard(Map<String, dynamic> address) {
+    final String label = address['label'] ?? 'General Address';
+
     return Card(
       elevation: 1,
       margin: const EdgeInsets.only(bottom: 10),
       child: ListTile(
+        // Handles tap for EDITING
+        onTap: () => _showEditAddressModal(address),
+
         leading: Icon(
-            (address['label'] ?? '').toLowerCase().contains('home')
+            (label).toLowerCase().contains('home')
                 ? Icons.home
                 : Icons.work,
             color: CustomColorTheme.CustomPrimaryAppColor),
         title: Text(
-          address['label'] ?? 'General Address',
+          label,
           style: const TextStyle(
             fontWeight: FontWeight.bold,
             color: CustomColorTheme.CustomPrimaryAppColor,
@@ -801,8 +901,78 @@ class _ProfileDetailsScreenState extends State<ProfileDetailsScreen> {
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
         ),
+        // --- FIX: Add Row of Icons for Edit and Delete ---
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min, // Essential to keep the Row tight
+          children: [
+            // Edit Icon (Original functionality)
+            IconButton(
+              icon: const Icon(Icons.edit, color: Colors.grey),
+              onPressed: () => _showEditAddressModal(address),
+            ),
+            // Delete Icon (New functionality)
+            IconButton(
+              icon: const Icon(Icons.delete_forever, color: Colors.red),
+              onPressed: () => _showDeleteConfirmation(label),
+            ),
+          ],
+        ),
+        // ----------------------------------------------------
       ),
     );
+  }
+
+  // In _ProfileDetailsScreenState class:
+
+  Future<void> _deleteAddressViaApi(String label) async {
+    setState(() => isUpdating = true);
+
+    try {
+      // ✅ FIX: Use the dedicated LaravelApiService.deleteAddress
+      final laravelDeleteResult = await LaravelApiService.deleteAddress(
+        email: _emailController.text,
+        label: label,
+      );
+
+      if (mounted) {
+        setState(() {
+          // The API returns the updated user object ('data' field),
+          // which contains the new 'full_addresses'.
+          final fullAddressesFromApi = laravelDeleteResult['full_addresses'];
+
+          if (fullAddressesFromApi is Map<String, dynamic>) {
+            // Convert the map of addresses to the List<Map<String, dynamic>> format used locally
+            _fullAddresses = fullAddressesFromApi
+                .entries
+                .map((e) => {'label': e.key, 'address': e.value})
+                .toList();
+          } else if (fullAddressesFromApi is List) {
+            // Fallback if the API returns a list (less common for associative arrays)
+            _fullAddresses = fullAddressesFromApi as List<dynamic>;
+          } else {
+            _fullAddresses = [];
+          }
+        });
+      }
+
+      // You need to update shared preferences with the entire user object ('data')
+      // returned by the API, as it contains the updated full_addresses.
+      await _updateSharedPreferencesWithLatestData(laravelDeleteResult);
+
+      Fluttertoast.showToast(
+          msg: 'Address deleted successfully!', backgroundColor: Colors.green);
+
+      // 🔄 REFRESH CACHE AFTER SUCCESSFUL DELETION
+      await _refreshDynamicContentCache();
+    } catch (e) {
+      Fluttertoast.showToast(
+          msg: 'Error deleting address: ${e.toString()}',
+          backgroundColor: Colors.red);
+    } finally {
+      if (mounted) {
+        setState(() => isUpdating = false);
+      }
+    }
   }
 
   Widget _buildTextField({

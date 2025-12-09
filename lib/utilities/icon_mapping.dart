@@ -365,15 +365,15 @@ class IconMapping {
     if (iconName.isEmpty) return fallback;
 
     final key = iconName.toLowerCase().trim();
-    print("Looking up icon for key: '$key'"); // Debug
+    // print("Looking up icon for key: '$key'"); // Debug
 
     // Look up the icon in the map. Returns IconData or fallback.
     final iconData = iconMap[key];
 
     if (iconData == null) {
-      print("Icon not found for key: '$key'. Using fallback: $fallback");
+      // print("Icon not found for key: '$key'. Using fallback: $fallback");
     } else {
-      print("Icon found: $iconData for key: '$key'");
+      // print("Icon found: $iconData for key: '$key'");
     }
 
     return iconData ?? fallback;
