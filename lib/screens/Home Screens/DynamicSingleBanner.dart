@@ -69,46 +69,44 @@ class DynamicSingleBannerState extends State<DynamicSingleBanner> {
     }
 
     if (imageUrl != null && imageUrl.isNotEmpty) {
-      return SizedBox(
-        height: 180,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: Image.network(
-            imageUrl,
-            fit: BoxFit.cover,
-            width: double.infinity,
-            loadingBuilder: (context, child, loadingProgress) {
-              if (loadingProgress == null) {
-                return child;
-              }
-              return Container(
-                color: Colors.grey[300],
-                child: Center(
-                  child: CircularProgressIndicator(
-                    value: loadingProgress.expectedTotalBytes != null
-                        ? loadingProgress.cumulativeBytesLoaded /
-                        loadingProgress.expectedTotalBytes!
-                        : null,
-                  ),
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Image.network(
+          imageUrl,
+          fit: BoxFit.fitWidth,
+          width: double.infinity,
+          loadingBuilder: (context, child, loadingProgress) {
+            if (loadingProgress == null) {
+              return child;
+            }
+            return Container(
+              height: 180,
+              color: Colors.grey[300],
+              child: Center(
+                child: CircularProgressIndicator(
+                  value: loadingProgress.expectedTotalBytes != null
+                      ? loadingProgress.cumulativeBytesLoaded /
+                      loadingProgress.expectedTotalBytes!
+                      : null,
                 ),
-              );
-            },
-            errorBuilder: (context, error, stackTrace) {
-              return Container(
-                color: Colors.grey[300],
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.error_outline, color: Colors.red),
-                    const Text('Failed to load banner',
-                        style: TextStyle(fontSize: 12)),
-                    Text('URL: ${imageUrl.substring(0, 30)}...',
-                        style: const TextStyle(fontSize: 10)),
-                  ],
-                ),
-              );
-            },
-          ),
+              ),
+            );
+          },
+          errorBuilder: (context, error, stackTrace) {
+            return Container(
+              color: Colors.grey[300],
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.error_outline, color: Colors.red),
+                  const Text('Failed to load banner',
+                      style: TextStyle(fontSize: 12)),
+                  Text('URL: ${imageUrl.substring(0, 30)}...',
+                      style: const TextStyle(fontSize: 10)),
+                ],
+              ),
+            );
+          },
         ),
       );
     }

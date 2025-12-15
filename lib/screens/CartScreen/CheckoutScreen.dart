@@ -107,7 +107,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     }
   }
 
-  Future<Map<String, dynamic>?> _fetchUserDataWithGetAndBody(String email, String? token) async {
+  Future<Map<String, dynamic>?> _fetchUserDataWithGetAndBody(String email ) async {
     final uri = Uri.parse('$localurl/api/user-by-email');
     final body = json.encode({"email": email});
 
@@ -115,7 +115,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       ..headers.addAll({
         'Content-Type': 'application/json',
         'Accept': 'application/json',
-        if (token != null) 'Authorization': 'Bearer $token',
+        // if (token != null) 'Authorization': 'Bearer $token',
       })
       ..body = body;
 
@@ -147,7 +147,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     final prefs = await SharedPreferences.getInstance();
     final customerData = prefs.getString('customer');
     final laravelUserData = prefs.getString('laravelUser');
-    final String? laravelToken = prefs.getString('laravelToken');
+    // final String? laravelToken = prefs.getString('laravelToken');
 
     if (customerData != null && laravelUserData != null) {
       setState(() {
@@ -162,7 +162,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       });
 
       if (_emailController.text.isNotEmpty) {
-        final responseData = await _fetchUserDataWithGetAndBody(_emailController.text, laravelToken);
+        final responseData = await _fetchUserDataWithGetAndBody(_emailController.text);
 
         final userData = responseData?['data'] as Map<String, dynamic>?;
 
@@ -778,12 +778,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       // If loyalty contributed something (it might be less than _loyaltyDiscountValue if clipped by order total)
       if (loyaltyContribution > 0) {
         final redeemUri = Uri.parse('$localurl/api/points/redeem');
-        final token = prefs.getString('laravelToken');
-        if (token == null) {
-          Fluttertoast.showToast(msg: "Please log in first");
-          setState(() => _isLoading = false);
-          return;
-        }
+        // final token = prefs.getString('laravelToken');
+        // if (token == null) {
+        //   Fluttertoast.showToast(msg: "Please log in first");
+        //   setState(() => _isLoading = false);
+        //   return;
+        // }
 
         // We redeem points corresponding to the monetary value contributed
         final pointsToRedeem = (_loyaltyPoints < widget.finalAmount)
@@ -797,7 +797,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             final redeemResponse = await http.post(
               redeemUri,
               headers: {
-                'Authorization': 'Bearer $token',
+                // 'Authorization': 'Bearer $token',
                 'Content-Type': 'application/json',
               },
               body: json.encode({"points_to_redeem": pointsToRedeem}),
@@ -1041,13 +1041,14 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     final Map<String, dynamic> body = {
       "draft_order": {
         "id": draftOrderId,
-        "payment_pending": isCod,
+        // "payment_pending": isCod,
       }
     };
 
+    // final uri = Uri.parse(
+    //     'https://$shopifyStoreUrl_const/admin/api/$adminApiVersion_const/draft_orders/$draftOrderId/complete.json');
     final uri = Uri.parse(
-        'https://$shopifyStoreUrl_const/admin/api/$adminApiVersion_const/draft_orders/$draftOrderId/complete.json');
-
+        'https://$shopifyStoreUrl_const/admin/api/$adminApiVersion_const/draft_orders/$draftOrderId/complete.json?payment_pending=true');
     final response = await http.put(
       uri,
       headers: {

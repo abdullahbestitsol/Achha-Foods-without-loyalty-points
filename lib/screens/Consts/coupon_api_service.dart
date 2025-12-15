@@ -15,9 +15,9 @@ class CouponApiService {
       // Get customer access token if available
       final prefs = await SharedPreferences.getInstance();
       final customerAccessToken = prefs.getString('laravelUser');
-      final laravelToken = prefs.getString('laravelToken');
+      // final laravelToken = prefs.getString('laravelToken');
 
-      print("🔑 Laravel Token: $laravelToken");
+      // print("🔑 Laravel Token: $laravelToken");
       print("👤 Laravel User (if any): $customerAccessToken");
       print("➡️ Sending request to: $baseUrl/generate-coupon");
       print("📦 Request body: ${json.encode({
@@ -30,7 +30,7 @@ class CouponApiService {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
-          'Authorization': 'Bearer $laravelToken',
+          // 'Authorization': 'Bearer $laravelToken',
         },
         body: json.encode({
           'discount_value': discountValue,

@@ -9,7 +9,7 @@ import 'package:achhafoods/screens/Profile/MainScreenProfile.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../Consts/CustomFloatingButton.dart';
-import '../Consts/shopify_auth_service.dart'; 
+import '../Consts/shopify_auth_service.dart';
 
 class MyAccount extends StatefulWidget {
   const MyAccount({super.key});
@@ -60,7 +60,8 @@ class _MyAccountState extends State<MyAccount> {
         );
 
         final referralCheckData = jsonDecode(referralCheckResponse.body);
-        if (referralCheckResponse.statusCode != 200 || referralCheckData["status"] != true) {
+        if (referralCheckResponse.statusCode != 200 ||
+            referralCheckData["status"] != true) {
           Fluttertoast.showToast(
             msg: "Invalid referral code",
             backgroundColor: Colors.red,
@@ -71,12 +72,32 @@ class _MyAccountState extends State<MyAccount> {
         }
       }
 
-      // 2️⃣ Register in Laravel first
+      // 2️⃣ FIRST: Try Shopify registration (to check if email exists)
+      final shopifyCustomer = await ShopifyAuthService.registerCustomer(
+        firstName,
+        lastName,
+        email,
+        password,
+      );
+
+      // CHECK SHOPIFY RESPONSE - If not successful, stop here
+      if (shopifyCustomer == null) {
+        // Shopify failed - email already exists in Shopify
+        Fluttertoast.showToast(
+          msg: "Email already registered in Shopify. Please use a different email or login.",
+          backgroundColor: Colors.red,
+          textColor: Colors.white,
+        );
+        setState(() => isLoading = false);
+        return; // Don't proceed to Laravel
+      }
+
+      // 3️⃣ Only proceed to Laravel if Shopify registration was successful
       final laravelRegisterUrl = Uri.parse("$localurl/api/register");
       Map<String, dynamic> requestBody = {
         "name": "$firstName $lastName",
         "email": email,
-        "password": password,
+        // "password": password,
         "phone": phoneNumber,
       };
 
@@ -96,33 +117,7 @@ class _MyAccountState extends State<MyAccount> {
       final laravelData = jsonDecode(laravelResponse.body);
 
       if (laravelResponse.statusCode == 201 && laravelData["status"] == true) {
-        // ✅ Laravel registration successful, now proceed to Shopify
-        final shopifyCustomer = await ShopifyAuthService.registerCustomer(
-          firstName,
-          lastName,
-          email,
-          password,
-        );
-
-        if (shopifyCustomer == null) {
-          // Handle Shopify failure. You might need to add a rollback for Laravel.
-          Fluttertoast.showToast(
-            msg: "Failed to register in Shopify. Please contact support.",
-            backgroundColor: Colors.red,
-            textColor: Colors.white,
-          );
-          setState(() => isLoading = false);
-          return;
-        }
-
-        // Both registrations are successful
-        // final token = laravelData["data"]["token"];
-        // final laravelUser = laravelData["data"]["user"];
-        // final prefs = await SharedPreferences.getInstance();
-        // await prefs.setString("laravelToken", token);
-        // await prefs.setString("laravelUser", jsonEncode(laravelUser));
-        // await prefs.setString("shopifyCustomer", jsonEncode(shopifyCustomer));
-
+        // Both Shopify and Laravel successful
         Fluttertoast.showToast(
           msg: "Account created successfully 🎉",
           backgroundColor: Colors.green,
@@ -140,28 +135,35 @@ class _MyAccountState extends State<MyAccount> {
 
         // Check if the detailed errors map exists
         if (laravelData["errors"] != null && laravelData["errors"] is Map) {
-
-          // 1. Prioritize 'email' error (for account existed)
-          if (laravelData["errors"]["email"] != null && laravelData["errors"]["email"] is List && laravelData["errors"]["email"].isNotEmpty) {
+          if (laravelData["errors"]["email"] != null &&
+              laravelData["errors"]["email"] is List &&
+              laravelData["errors"]["email"].isNotEmpty) {
             errorMessage = laravelData["errors"]["email"].first;
-            // 2. Check 'phone' error (also common for existing account)
-          } else if (laravelData["errors"]["phone"] != null && laravelData["errors"]["phone"] is List && laravelData["errors"]["phone"].isNotEmpty) {
+          } else if (laravelData["errors"]["phone"] != null &&
+              laravelData["errors"]["phone"] is List &&
+              laravelData["errors"]["phone"].isNotEmpty) {
             errorMessage = laravelData["errors"]["phone"].first;
           } else {
-            // 3. Fallback: Take the first available error message
             for (var key in laravelData["errors"].keys) {
-              if (laravelData["errors"][key] is List && laravelData["errors"][key].isNotEmpty) {
+              if (laravelData["errors"][key] is List &&
+                  laravelData["errors"][key].isNotEmpty) {
                 errorMessage = laravelData["errors"][key].first;
                 break;
               }
             }
           }
         } else if (laravelData["message"] != null) {
-          // Fallback to the general message if 'errors' object is not found
           errorMessage = laravelData["message"];
         }
 
-        // Display the specific error message to the client
+        // IMPORTANT: If Laravel fails but Shopify succeeded, we need to delete Shopify customer
+        // Add a rollback API call to delete the Shopify user
+        if (shopifyCustomer != null) {
+          // Call your Shopify delete function here
+          // await ShopifyAuthService.deleteCustomer(shopifyCustomerId);
+          print("WARNING: Shopify user created but Laravel failed. Need rollback.");
+        }
+
         Fluttertoast.showToast(
           msg: errorMessage,
           backgroundColor: Colors.red,
@@ -169,7 +171,14 @@ class _MyAccountState extends State<MyAccount> {
         );
       } else {
         print('Laravel registration failed: ${laravelResponse.body}');
-        // Laravel registration failed
+
+        // IMPORTANT: If Laravel fails but Shopify succeeded, we need to delete Shopify customer
+        if (shopifyCustomer != null) {
+          // Call your Shopify delete function here
+          // await ShopifyAuthService.deleteCustomer(shopifyCustomerId);
+          print("WARNING: Shopify user created but Laravel failed. Need rollback.");
+        }
+
         Fluttertoast.showToast(
           msg: laravelData["message"] ?? "Laravel registration failed",
           backgroundColor: Colors.red,
@@ -206,7 +215,7 @@ class _MyAccountState extends State<MyAccount> {
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 decoration: BoxDecoration(
                   border: Border(
-                    bottom: BorderSide(color: Colors.grey[300]!, width: 1),
+                    bottom: BorderSide(color: Colors.grey[800]!, width: 1),
                   ),
                 ),
                 child: Text(
@@ -223,14 +232,14 @@ class _MyAccountState extends State<MyAccount> {
                 label: 'First Name',
                 onChanged: (val) => firstName = val,
                 validator: (val) =>
-                    (val == null || val.isEmpty) ? 'Required' : null,
+                (val == null || val.isEmpty) ? 'Required' : null,
               ),
               const SizedBox(height: 15),
               _buildTextField(
                 label: 'Last Name',
                 onChanged: (val) => lastName = val,
                 validator: (val) =>
-                    (val == null || val.isEmpty) ? 'Required' : null,
+                (val == null || val.isEmpty) ? 'Required' : null,
               ),
               const SizedBox(height: 15),
               _buildTextField(
@@ -264,7 +273,7 @@ class _MyAccountState extends State<MyAccount> {
                 obscureText: _obscureConfirmPassword,
                 onChanged: (val) => confirmPassword = val,
                 toggleVisibility: () => setState(
-                    () => _obscureConfirmPassword = !_obscureConfirmPassword),
+                        () => _obscureConfirmPassword = !_obscureConfirmPassword),
               ),
               // const SizedBox(height: 15),
               // _buildTextField(
@@ -283,28 +292,29 @@ class _MyAccountState extends State<MyAccount> {
                 onPressed: isLoading ? null : _registerCustomer,
                 child: isLoading
                     ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
                     : const Text(
-                        'CREATE ACCOUNT',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
-                      ),
+                  'CREATE ACCOUNT',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
               ),
               const SizedBox(height: 20),
               TextButton(
                 onPressed: () => Navigator.pop(context),
                 child: const Text(
                   'Already have an account? Sign in',
-                  style: TextStyle(color: CustomColorTheme.CustomPrimaryAppColor),
+                  style:
+                  TextStyle(color: CustomColorTheme.CustomPrimaryAppColor),
                 ),
               ),
             ],
@@ -323,15 +333,17 @@ class _MyAccountState extends State<MyAccount> {
     return TextFormField(
       decoration: InputDecoration(
         labelText: label,
+        labelStyle: TextStyle(color: Colors.grey[800]), // Color changed here
         prefixIcon: const Icon(Icons.person_outline,
             color: CustomColorTheme.CustomPrimaryAppColor),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: Colors.grey[300]!),
+          borderSide: BorderSide(color: Colors.grey[800]!),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: CustomColorTheme.CustomPrimaryAppColor),
+          borderSide:
+          const BorderSide(color: CustomColorTheme.CustomPrimaryAppColor),
         ),
       ),
       keyboardType: keyboardType,
@@ -349,30 +361,32 @@ class _MyAccountState extends State<MyAccount> {
     return TextFormField(
       decoration: InputDecoration(
         labelText: label,
+        labelStyle: TextStyle(color: Colors.grey[800]), // Color changed here
         prefixIcon: const Icon(Icons.lock_outline,
             color: CustomColorTheme.CustomPrimaryAppColor),
         suffixIcon: IconButton(
           icon: Icon(
             obscureText ? Icons.visibility_off : Icons.visibility,
-            color: Colors.grey[600],
+            color: Colors.grey[800],
           ),
           onPressed: toggleVisibility,
         ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: Colors.grey[300]!),
+          borderSide: BorderSide(color: Colors.grey[800]!),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: CustomColorTheme.CustomPrimaryAppColor),
+          borderSide:
+          const BorderSide(color: CustomColorTheme.CustomPrimaryAppColor),
         ),
       ),
       obscureText: obscureText,
       validator: (value) => value == null || value.isEmpty
           ? 'Required'
-          : value.length < 6
-              ? 'Minimum 6 characters'
-              : null,
+          : value.length < 8
+          ? 'Minimum 8 characters'
+          : null,
       onChanged: onChanged,
     );
   }

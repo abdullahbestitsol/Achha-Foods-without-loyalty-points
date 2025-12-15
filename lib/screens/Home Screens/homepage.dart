@@ -29,19 +29,28 @@ class _HomePageState extends State<HomePage> {
   final ScrollController _scrollController = ScrollController();
   bool _showBackToTop = false;
 
-  // Add state for collection products
+  // Existing state for Featured Products
   List<AllProductsModel> _collectionProducts = [];
   bool _isCollectionLoading = false;
   String? _collectionError;
   String _collectionName = 'Featured Products';
+
+  // NEW state for Hot Deals Products
+  List<AllProductsModel> _hotDealsProducts = [];
+  bool _isHotDealsLoading = false;
+  String? _hotDealsError;
+  String _hotDealsName = 'Hot Deals'; // Default name
 
   final GlobalKey<DynamicSingleBannerState> _bannerKey = GlobalKey();
 
   @override
   void initState() {
     super.initState();
-    _productCacheService.loadAllData();
-    _loadCollectionProducts();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _productCacheService.loadAllData();
+      _loadCollectionProducts();
+      _loadHotDealsProducts(); // <-- NEW: Load Hot Deals
+    });
 
     _scrollController.addListener(() {
       final shouldShow = _scrollController.offset > 400;
@@ -59,7 +68,10 @@ class _HomePageState extends State<HomePage> {
     super.dispose();
   }
 
+  // --- FEATURED PRODUCTS LOAD ---
   Future<void> _loadCollectionProducts() async {
+    final dynamicCache = Provider.of<DynamicContentCache>(context, listen: false);
+
     if (_isCollectionLoading) return;
 
     setState(() {
@@ -68,7 +80,11 @@ class _HomePageState extends State<HomePage> {
     });
 
     try {
-      final result = await fetchProductsByCollectionId('482865316117');
+      final collectionId = dynamicCache.getsection1productsIDTitle();
+      if (collectionId == null || collectionId.isEmpty) {
+        throw Exception("Featured collection ID is not set.");
+      }
+      final result = await fetchProductsByCollectionId(collectionId);
       setState(() {
         _collectionProducts = result['products'] ?? [];
         _collectionName = result['collectionName'] ?? 'Featured Products';
@@ -84,6 +100,37 @@ class _HomePageState extends State<HomePage> {
       });
     }
   }
+
+  // --- NEW: HOT DEALS PRODUCTS LOAD ---
+  Future<void> _loadHotDealsProducts() async {
+    final dynamicCache = Provider.of<DynamicContentCache>(context, listen: false);
+    final hotDealsId = dynamicCache.getsection2productsIDTitle();
+
+    if (hotDealsId == null || hotDealsId.isEmpty || _isHotDealsLoading) return;
+
+    setState(() {
+      _isHotDealsLoading = true;
+      _hotDealsError = null;
+    });
+
+    try {
+      final result = await fetchProductsByCollectionId(hotDealsId);
+      setState(() {
+        _hotDealsProducts = result['products'] ?? [];
+        _hotDealsName = result['collectionName'] ?? 'Hot Deals';
+      });
+    } catch (e) {
+      setState(() {
+        _hotDealsError = e.toString();
+        _hotDealsProducts = [];
+      });
+    } finally {
+      setState(() {
+        _isHotDealsLoading = false;
+      });
+    }
+  }
+
 
   Future<Map<String, dynamic>> fetchProductsByCollectionId(
       String collectionId) async {
@@ -277,7 +324,7 @@ class _HomePageState extends State<HomePage> {
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
             child: Text(
               title,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
             ),
           ),
         GridView.builder(
@@ -302,7 +349,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    // Use Provider to get DynamicContentCache instance
+    // Use Provider to get DynamicContentCache instance for listening purposes
     final dynamicCache = Provider.of<DynamicContentCache>(context);
 
     return Scaffold(
@@ -331,13 +378,14 @@ class _HomePageState extends State<HomePage> {
           final isCategoriesLoading = _productCacheService.isCategoriesLoading;
           final isDynamicLoading = dynamicCache.isLoading;
 
-          if (isProductsLoading || isCategoriesLoading || isDynamicLoading || _isCollectionLoading) {
+          // Check all loading states, including the two dynamic collections
+          if (isProductsLoading || isCategoriesLoading || isDynamicLoading || _isCollectionLoading || _isHotDealsLoading) {
             return _buildShimmerLoading();
           }
 
           final allProducts = _productCacheService.allProducts;
           final allCategories = _productCacheService.allCategories;
-          final hotDeals = allProducts.toList();
+          // Note: The variable 'hotDeals' that used to point to allProducts is now replaced by the dynamically fetched _hotDealsProducts
 
           return Stack(
             children: [
@@ -346,6 +394,7 @@ class _HomePageState extends State<HomePage> {
                   await _productCacheService.refreshAllData();
                   await dynamicCache.loadDynamicData();
                   await _loadCollectionProducts();
+                  await _loadHotDealsProducts(); // <-- NEW: Refresh Hot Deals
                   _bannerKey.currentState?.refreshBanner();
                 },
                 child: SingleChildScrollView(
@@ -383,9 +432,9 @@ class _HomePageState extends State<HomePage> {
                           error: _productCacheService.categoriesError,
                         ),
 
-                        const SizedBox(height: 20),
+                        // const SizedBox(height: 5),
 
-                        // 🔹 Collection Products
+                        // 🔹 Featured Products (Collection 1)
                         _buildProductGrid(
                           title: _collectionName,
                           products: _collectionProducts,
@@ -400,18 +449,23 @@ class _HomePageState extends State<HomePage> {
                         ),
                         const SizedBox(height: 20),
 
-                        // 🔹 Hot Deals
-                        ListenableBuilder(
-                          listenable: dynamicCache,
-                          builder: (context, _) {
-                            final hotTitle = dynamicCache.getHotDealsTitle();
-                            return _buildProductGrid(
-                              title: hotTitle,
-                              products: hotDeals,
-                              error: _productCacheService.productsError,
-                            );
-                          },
+                        _buildProductGrid(
+                          title: _hotDealsName,
+                          products: _hotDealsProducts,
+                          error: _hotDealsError,
                         ),
+                        // 🔹 Hot Deals (Collection 2 - Dynamically Fetched)
+                        // ListenableBuilder(
+                        //   listenable: dynamicCache,
+                        //   builder: (context, _) {
+                        //     final hotTitle = dynamicCache.getHotDealsTitle() ?? _hotDealsName;
+                        //     return _buildProductGrid(
+                        //       title: hotTitle,
+                        //       products: _hotDealsProducts, // <-- NEW: Using the fetched Hot Deals list
+                        //       error: _hotDealsError,      // <-- NEW: Using specific Hot Deals error state
+                        //     );
+                        //   },
+                        // ),
 
                         const SizedBox(height: 20),
                       ],
@@ -419,23 +473,6 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
               ),
-
-              // if (_showBackToTop)
-              //   Positioned(
-              //     bottom: 20,
-              //     right: 20,
-              //     child: FloatingActionButton(
-              //       onPressed: () {
-              //         _scrollController.animateTo(
-              //           0,
-              //           duration: const Duration(milliseconds: 500),
-              //           curve: Curves.easeOut,
-              //         );
-              //       },
-              //       backgroundColor: Colors.red[400],
-              //       child: const Icon(Icons.arrow_upward, color: Colors.white),
-              //     ),
-              //   ),
             ],
           );
         },

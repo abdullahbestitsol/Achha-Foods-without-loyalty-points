@@ -211,14 +211,22 @@ class _ProfileDetailsScreenState extends State<ProfileDetailsScreen> {
     final TextEditingController labelController = TextEditingController();
     final TextEditingController addressController = TextEditingController();
 
+    // Define the custom primary color
+    const Color customPrimaryColor = Color(0xffEC1D28);
+    const Color blackTextColor = Colors.black;
+
     showDialog(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: const Text('Add New Address'),
+          title: const Text(
+            'Add New Address',
+            style: TextStyle(color: blackTextColor), // Title text black
+          ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
+              // Assuming _buildTextField handles its own text color
               _buildTextField(
                 controller: labelController,
                 label: 'Address Label (e.g., Home, Work)',
@@ -234,11 +242,21 @@ class _ProfileDetailsScreenState extends State<ProfileDetailsScreen> {
             ],
           ),
           actions: <Widget>[
+            // 1. Cancel Button: Black text only (using TextButton)
             TextButton(
-              child: const Text('Cancel'),
+              child: const Text(
+                'Cancel',
+                style: TextStyle(color: blackTextColor), // Cancel text black
+              ),
               onPressed: () => Navigator.of(context).pop(),
             ),
+
+            // 2. Add Button: Background 0xffEC1D28, Text white (using ElevatedButton)
             ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: customPrimaryColor, // Set button background color
+                foregroundColor: Colors.white,       // Set button text color to white
+              ),
               child: const Text('Add'),
               onPressed: () async {
                 final label = labelController.text.trim();
@@ -421,14 +439,14 @@ class _ProfileDetailsScreenState extends State<ProfileDetailsScreen> {
         );
         return;
       }
-      if (_currentPasswordController.text.isEmpty) {
-        Fluttertoast.showToast(
-          msg: 'Please enter current password to change password',
-          backgroundColor: Colors.red,
-          textColor: Colors.white,
-        );
-        return;
-      }
+      // if (_currentPasswordController.text.isEmpty) {
+      //   Fluttertoast.showToast(
+      //     msg: 'Please enter current password to change password',
+      //     backgroundColor: Colors.red,
+      //     textColor: Colors.white,
+      //   );
+      //   return;
+      // }
     }
 
     setState(() => isUpdating = true);
@@ -473,8 +491,6 @@ class _ProfileDetailsScreenState extends State<ProfileDetailsScreen> {
         firstName: _firstNameController.text,
         lastName: _lastNameController.text,
         phone: _phoneController.text,
-        oldPassword: changingPassword ? _currentPasswordController.text : null,
-        newPassword: changingPassword ? _passwordController.text : null,
       );
 
       laravelSuccess = true;
@@ -483,8 +499,15 @@ class _ProfileDetailsScreenState extends State<ProfileDetailsScreen> {
           _fullAddresses = laravelResult['full_addresses'] ?? [];
         });
       }
-    
+
+      // if (kDebugMode) {
+      //   print('DEBUG: changingPassword=$changingPassword');
+      //   print('DEBUG: shopifySuccess=$shopifySuccess');
+      //   print('DEBUG: laravelSuccess=$laravelSuccess');
+      // }
+
       if (changingPassword && (!shopifySuccess || !laravelSuccess)) {
+      // if (!shopifySuccess || !laravelSuccess) {
         Fluttertoast.showToast(
           msg:
           '❌ Password not synced. Either Shopify or Laravel update failed. Rolling back...',
@@ -496,6 +519,7 @@ class _ProfileDetailsScreenState extends State<ProfileDetailsScreen> {
       }
 
       if (!changingPassword || (shopifySuccess && laravelSuccess)) {
+      // if (shopifySuccess && laravelSuccess) {
         final updatedCustomerResult = await ShopifyAuthService.updateCustomerInfo(
           customerId: customerId,
           firstName: _firstNameController.text,
@@ -705,15 +729,15 @@ class _ProfileDetailsScreenState extends State<ProfileDetailsScreen> {
           ),
         ),
         const SizedBox(height: 15),
-        _buildPasswordField(
-          controller: _currentPasswordController,
-          label:
-          _dynamicContentCache.getAccountCurrentPassword() ?? 'Current Password',
-          isVisible: _isCurrentPasswordVisible,
-          onToggleVisibility: () =>
-              setState(() => _isCurrentPasswordVisible = !_isCurrentPasswordVisible),
-        ),
-        const SizedBox(height: 15),
+        // _buildPasswordField(
+        //   controller: _currentPasswordController,
+        //   label:
+        //   _dynamicContentCache.getAccountCurrentPassword() ?? 'Current Password',
+        //   isVisible: _isCurrentPasswordVisible,
+        //   onToggleVisibility: () =>
+        //       setState(() => _isCurrentPasswordVisible = !_isCurrentPasswordVisible),
+        // ),
+        // const SizedBox(height: 15),
         _buildPasswordField(
           controller: _passwordController,
           label: _dynamicContentCache.getAccountNewPassword() ?? 'New Password',
@@ -990,6 +1014,9 @@ class _ProfileDetailsScreenState extends State<ProfileDetailsScreen> {
       maxLines: maxLines,
       decoration: InputDecoration(
         labelText: label,
+        labelStyle: TextStyle(
+          color: Colors.grey[800], // Set label text color to Grey 800
+        ),
         prefixIcon: Icon(icon, color: CustomColorTheme.CustomPrimaryAppColor),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),

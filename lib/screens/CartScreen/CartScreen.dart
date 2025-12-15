@@ -1,4 +1,5 @@
 import 'package:achhafoods/screens/Consts/conts.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:achhafoods/screens/Consts/CustomColorTheme.dart';
@@ -68,35 +69,78 @@ class _CartScreenState extends State<CartScreen> {
     super.dispose();
   }
 
+  // Location: CartScreenState
   Future<void> _loadLaravelUser() async {
     final prefs = await SharedPreferences.getInstance();
-    final userData = prefs.getString('laravelUser');
-    final userDataToken = prefs.getString('laravelToken');
-    print("userData: $userData");
-    print("userData token: $userDataToken");
+    final userDataJson = prefs.getString('laravelUser');
 
-    try{
-      final response = await http.get(
-        Uri.parse('$localurl/api/points/summary'),
-        headers: {
-          'Authorization': 'Bearer $userDataToken',
-          'Content-Type': 'application/json',
-        }
-      );
-
-      final responseData = json.decode(response.body);
-      print("Loyalty points response: $responseData");
-      if (userData != null) {
-        setState(() {
-          _loyaltyPoints = responseData?['total_points'] ?? 0;
-          print("Loyalty points loaded: $_loyaltyPoints");
-        });
-      }
-    }catch(e){
-      print("Error fetching loyalty points: $e");
-      // Fluttertoast.showToast(msg: "Error fetching loyalty points: $e", backgroundColor: Colors.red);
+    if (userDataJson == null) {
+      if (kDebugMode) print("Laravel user data missing. Skipping loyalty load.");
+      return;
     }
 
+    // --- START: Simple ID Retrieval ---
+    int? userId;
+    try {
+      // Decode the JSON string into a Map
+      final Map<String, dynamic> userData = json.decode(userDataJson);
+      // Extract the ID as an integer
+      userId = userData['id'] as int?;
+    } catch (e) {
+      if (kDebugMode) print("Error decoding laravelUser JSON or ID missing/invalid: $e");
+      // Return early if we can't get the ID
+      return;
+    }
+
+    if (userId == null) {
+      if (kDebugMode) print("User ID is null after decoding. Cannot fetch points.");
+      return;
+    }
+    // --- END: Simple ID Retrieval ---
+
+    // 1. Construct the URL with the ID as a query parameter
+    final url = Uri.parse('$localurl/api/points/summary')
+        .replace(queryParameters: {'id': userId.toString()});
+
+    // Start with the default points value
+    int fetchedPoints = 0;
+
+    try {
+      final response = await http.get(
+        url, // Use the URL with query parameter
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      );
+
+      // 2. Handle HTTP Status
+      if (response.statusCode == 200) {
+        // Safely decode the JSON response
+        final responseData = json.decode(response.body);
+        if (kDebugMode) print("Loyalty points response: $responseData");
+
+        // Extract points based on your API structure (data -> points_summary -> total_points)
+        if (responseData is Map<String, dynamic> && responseData['status'] == 'success') {
+          fetchedPoints = responseData['data']?['points_summary']?['total_points'] ?? 0;
+          if (kDebugMode) print("Loyalty points loaded: $fetchedPoints");
+        }
+      } else {
+        if (kDebugMode) print("Error fetching loyalty points: HTTP Status Code ${response.statusCode}.");
+        // Handle the case where the server returns a non-200 status (which often leads to the HTML error)
+        Fluttertoast.showToast(msg: "Server Error: Failed to fetch points (HTTP ${response.statusCode}).", backgroundColor: Colors.red);
+      }
+
+      // 3. Update state
+      setState(() {
+        _loyaltyPoints = fetchedPoints;
+      });
+
+    } catch (e) {
+      // Catch network errors or FormatException from json.decode if response.statusCode was 200
+      if (kDebugMode) print("Error fetching loyalty points (Network/Decoding): $e");
+      Fluttertoast.showToast(msg: "Error reading loyalty data.", backgroundColor: Colors.red);
+    }
   }
 
   Future<void> _toggleLoyaltyPoints(bool newValue) async {
@@ -357,8 +401,6 @@ class _CartScreenState extends State<CartScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final laravelDetails = laravelUser;
-    print("laravelDetails: $laravelDetails");
     return Scaffold(
       floatingActionButton: CustomWhatsAppFAB(),
       bottomNavigationBar: const NewNavigationBar(),

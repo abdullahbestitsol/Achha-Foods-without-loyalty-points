@@ -58,6 +58,8 @@ class DynamicContentCache extends ChangeNotifier {
       debugPrint("🛒 navigationBarMyAccount: ${fetchedData.navigationBarMyAccount}");
       debugPrint("🛒 navigationBarBack: ${fetchedData.navigationBarBack}");
       debugPrint("🏷️ homeFeaturedProducts: ${fetchedData.homeFeaturedProducts}");
+      debugPrint("🏷️ section1productsIDTitle: ${fetchedData.section1productsIDTitle}");
+      debugPrint("🏷️ section2productsIDTitle: ${fetchedData.section2productsIDTitle}");
       debugPrint("🏷️ homeHotDeals: ${fetchedData.homeHotDeals}");
       debugPrint("🏷️ shopTitle: ${fetchedData.shopTitle}");
       debugPrint("🏷️ shopPopularCategories: ${fetchedData.shopPopularCategories}");
@@ -150,6 +152,8 @@ class DynamicContentCache extends ChangeNotifier {
   String? getNavigationBarMyAccountIcon() => cachedData?.navigationBarMyAccountIcon;
   String? getNavigationBarBackIcon() => cachedData?.navigationBarBackIcon;
   String? getFeaturedProductsTitle() => cachedData?.homeFeaturedProducts;
+  String? getsection1productsIDTitle() => cachedData?.section1productsIDTitle;
+  String? getsection2productsIDTitle() => cachedData?.section2productsIDTitle;
   String? getHotDealsTitle() => cachedData?.homeHotDeals;
   String? getPopularCollectionsTitle() => cachedData?.homePopularCollections;
   String? getShopTitle() => cachedData?.shopTitle;

@@ -70,18 +70,18 @@ class LaravelApiService {
     String? firstName,
     String? lastName,
     String? phone,
-    String? oldPassword,
-    String? newPassword,
+    // String? oldPassword,
+    // String? newPassword,
     String? newAddressLabel,
     String? newAddressValue,
   }) async {
     // 1. Fetch the Laravel access token from SharedPreferences
     final prefs = await SharedPreferences.getInstance();
-    final laravelToken = prefs.getString('laravelToken');
+    // final laravelToken = prefs.getString('laravelToken');
 
-    if (kDebugMode) {
-      print("🔑 Laravel Token: ${laravelToken != null ? 'Present' : 'Missing'}");
-    }
+    // if (kDebugMode) {
+    //   print("🔑 Laravel Token: ${laravelToken != null ? 'Present' : 'Missing'}");
+    // }
 
     // Assumes 'localurl' is available via the 'conts.dart' import
     final url = Uri.parse('$localurl/api/user/update-profile');
@@ -100,11 +100,11 @@ class LaravelApiService {
     if (phone != null) body['phone'] = phone;
 
     // Password Update
-    if (newPassword != null && newPassword.isNotEmpty) {
-      body['old_password'] = oldPassword;
-      body['password'] = newPassword;
-      body['password_confirmation'] = newPassword; // For Laravel's 'confirmed' rule
-    }
+    // if (newPassword != null && newPassword.isNotEmpty) {
+    //   body['old_password'] = oldPassword;
+    //   body['password'] = newPassword;
+    //   body['password_confirmation'] = newPassword; // For Laravel's 'confirmed' rule
+    // }
 
     // Address Update (Adding one new address)
     if (newAddressLabel != null && newAddressValue != null) {
@@ -118,9 +118,9 @@ class LaravelApiService {
       'Accept': 'application/json',
     };
 
-    if (laravelToken != null) {
-      headers['Authorization'] = 'Bearer $laravelToken';
-    }
+    // if (laravelToken != null) {
+    //   headers['Authorization'] = 'Bearer $laravelToken';
+    // }
 
     try {
       final response = await http.post(

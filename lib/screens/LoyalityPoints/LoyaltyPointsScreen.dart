@@ -107,18 +107,18 @@ class _LoyaltyPointsScreenState extends State<LoyaltyPointsScreen> {
   Future<void> _fetchLoyaltyPoints() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final laravelToken = prefs.getString('laravelToken');
+      // final laravelToken = prefs.getString('laravelToken');
       final laravelUser = prefs.getString('laravelUser');
-      print("Fetching loyalty points with token: $laravelToken");
-
-      if (laravelToken == null || laravelUser == null) {
-        return;
-      }
+      // print("Fetching loyalty points with token: $laravelToken");
+      //
+      // if (laravelToken == null || laravelUser == null) {
+      //   return;
+      // }
 
       final response = await http.get(
         Uri.parse("$localurl/api/points/summary"),
         headers: {
-          "Authorization": "Bearer $laravelToken",
+          // "Authorization": "Bearer $laravelToken",
           "Accept": "application/json",
         },
       );

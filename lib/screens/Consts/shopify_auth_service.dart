@@ -98,6 +98,72 @@ class ShopifyAuthService {
     return null;
   }
 
+
+  /// ❌ **DELETE CUSTOMER (Admin API)**
+  static Future<bool> deleteCustomer(String customerId) async {
+    print("----------------------------------------------------------------");
+    print("🚀 STARTING SHOPIFY DELETE PROCESS");
+    print("----------------------------------------------------------------");
+
+    try {
+      // 1. ID Parsing
+      String numericId = customerId;
+      if (customerId.contains('/')) {
+        numericId = customerId.split('/').last;
+      }
+      print("🔍 Original ID: $customerId");
+      print("🔢 Parsed Numeric ID: $numericId");
+
+      // 2. URL Construction
+      final url = Uri.https(
+        shopifyStoreUrl,
+        '/admin/api/$adminApiVersion/customers/$numericId.json',
+      );
+      print("🌐 Request URL: $url");
+
+      // 3. Headers
+      final headers = {
+        'Content-Type': 'application/json',
+        'X-Shopify-Access-Token': adminAccessToken,
+      };
+      // BE CAREFUL printing tokens in production logs, ok for debug
+      print("🔑 Headers Sent: $headers");
+
+      // 4. API Call
+      print("⏳ Sending DELETE request...");
+      final response = await http.delete(url, headers: headers);
+      print("📨 Request Sent.");
+
+      // 5. Response Logging
+      print("----------------------------------------------------------------");
+      print("📥 SHOPIFY RESPONSE RECEIVED");
+      print("----------------------------------------------------------------");
+      print("📊 Status Code: ${response.statusCode}");
+      print("📄 Body: ${response.body}");
+      print("----------------------------------------------------------------");
+
+      if (response.statusCode == 200) {
+        if (kDebugMode) print('✅ Customer deleted successfully: $numericId');
+        return true;
+      } else {
+        // Handle 422 specifically (Customer has orders)
+        if (response.statusCode == 422) {
+          print("⚠️ ERROR 422 DETECTED: Unprocessable Entity.");
+          print("👉 REASON: This usually means the customer has placed orders.");
+          print("ℹ️ Shopify does not allow deleting customers with financial history.");
+          print("👉 ACTION: The app should proceed to 'Soft Delete' (Local Logout + Laravel Status Update).");
+        } else {
+          print("❌ DELETE FAILED with unexpected status: ${response.statusCode}");
+        }
+        return false;
+      }
+    } catch (e) {
+      print("💥 CRITICAL EXCEPTION in deleteCustomer:");
+      print(e);
+      return false;
+    }
+  }
+
   static Future<Map<String, dynamic>?> updateCustomerPassword({
     required String customerId,
     required String newPassword,

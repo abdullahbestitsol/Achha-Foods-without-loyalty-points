@@ -171,7 +171,8 @@ class _MainScreenState extends State<MainScreen> {
       Map<String, dynamic> latestData) async {
     final prefs = await SharedPreferences.getInstance();
     final storedCustomerJson = prefs.getString('customer');
-    final storedData = storedCustomerJson != null ? json.decode(storedCustomerJson) : {};
+    final storedData =
+    storedCustomerJson != null ? json.decode(storedCustomerJson) : {};
 
     final Map<String, dynamic> newCustomerData = {
       ...storedData,
@@ -289,21 +290,24 @@ class _MainScreenState extends State<MainScreen> {
           },
           body: jsonEncode({
             "email": email,
-            "password": password,
+            // "password": password,
           }),
         );
 
         final laravelData = jsonDecode(laravelResponse.body);
+        print("All Dataaa: $laravelData");
 
-        if (laravelResponse.statusCode == 200 && laravelData["status"] == true) {
+        if (laravelResponse.statusCode == 200 &&
+            laravelData["status"] == true) {
           final prefs = await SharedPreferences.getInstance();
 
-          final token = laravelData["data"]["token"];
-          laravelUser = laravelData["data"]["user"];
-          await prefs.setString("laravelToken", token);
+          // final token = laravelData["data"]["token"];
+          laravelUser = laravelData["data"];
+          // await prefs.setString("laravelToken", token);
           await prefs.setString("laravelUser", jsonEncode(laravelUser));
 
-          await prefs.setString("shopifyCustomer", jsonEncode(loggedInCustomer));
+          await prefs.setString(
+              "shopifyCustomer", jsonEncode(loggedInCustomer));
           await prefs.setString('customer', json.encode(loggedInCustomer));
 
           if (mounted) {
@@ -342,12 +346,174 @@ class _MainScreenState extends State<MainScreen> {
     } catch (e) {
       if (kDebugMode) print("Login error: $e");
       Fluttertoast.showToast(
-        msg: "Wrong credentials or connection error",
+        msg: "Wrong credentials!",
         backgroundColor: Colors.red,
         textColor: Colors.white,
       );
     } finally {
       if (mounted) setState(() => isLoading = false);
+    }
+  }
+
+// --- UPDATED DELETE ACCOUNT FUNCTION ---
+  Future<void> _deleteAccount(BuildContext context) async {
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Padding(
+          padding: const EdgeInsets.all(20.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.warning_amber_rounded,
+                  color: Colors.red, size: 50),
+              const SizedBox(height: 16),
+              const Text(
+                "Delete Account?",
+                style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.red),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                "This action is permanent and cannot be undone. Are you sure?",
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 16, color: Colors.black87),
+              ),
+              const SizedBox(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.grey[300],
+                      foregroundColor: Colors.black87,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onPressed: () => Navigator.of(context).pop(false),
+                    child: const Text("Cancel"),
+                  ),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onPressed: () => Navigator.of(context).pop(true),
+                    child: const Text("Delete"),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (shouldDelete != true) return;
+
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) =>
+        const Center(child: CircularProgressIndicator(color: CustomColorTheme.CustomPrimaryAppColor,)),
+      );
+    }
+
+    try {
+      // 1. ATTEMPT SHOPIFY DELETE
+      bool shopifyDeleted = false;
+      if (idofcustomer != 0) {
+        shopifyDeleted = await ShopifyAuthService.deleteCustomer(idofcustomer.toString());
+
+        // CHECK SHOPIFY RESPONSE - If not successful, stop here
+        if (!shopifyDeleted) {
+          if (mounted) Navigator.pop(context);
+          Fluttertoast.showToast(
+            msg: "Failed to delete Shopify account. Account cannot be deleted if customer has placed orders.",
+            backgroundColor: Colors.red,
+            textColor: Colors.white,
+          );
+          return; // Don't proceed to Laravel
+        }
+      } else {
+        shopifyDeleted = true; // Assume success if no ID
+      }
+
+      // 2. DEACTIVATE IN LARAVEL (Only reached if Shopify was successful)
+      bool laravelDeactivated = false;
+      String userEmail = _emailController.text;
+      if (userEmail.isEmpty && customer != null) {
+        userEmail = customer!['customer']['email'] ?? '';
+      }
+
+      if (userEmail.isNotEmpty) {
+        try {
+          final laravelUrl = Uri.parse("$localurl/api/delete-account");
+          if (kDebugMode) print("Attempting Laravel Soft Delete for: $userEmail");
+
+          final laravelResponse = await http.post(
+            laravelUrl,
+            headers: {
+              "Content-Type": "application/json",
+              "Accept": "application/json",
+            },
+            body: jsonEncode({"email": userEmail}),
+          );
+
+          if (kDebugMode) {
+            print("Laravel Soft Delete Response: ${laravelResponse.statusCode}");
+            print("Laravel Body: ${laravelResponse.body}");
+          }
+
+          if (laravelResponse.statusCode == 200) {
+            laravelDeactivated = true;
+          }
+        } catch (e) {
+          if (kDebugMode) print("Laravel error: $e");
+        }
+      }
+
+      if (mounted) Navigator.pop(context); // Remove loading
+
+      // 3. FINAL CHECK: Both should be successful
+      if (shopifyDeleted && laravelDeactivated) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.clear();
+
+        if (mounted) {
+          setState(() {
+            customer = null;
+            laravelUser = null;
+            _isInitialLoad = false;
+            _firstNameController.clear();
+            _lastNameController.clear();
+            _emailController.clear();
+          });
+        }
+
+        Fluttertoast.showToast(
+          msg: "Account deleted successfully",
+          backgroundColor: Colors.grey[700],
+          textColor: Colors.white,
+        );
+      } else {
+        Fluttertoast.showToast(
+          msg: "Failed to delete account. Please try again.",
+          backgroundColor: Colors.red,
+          textColor: Colors.white,
+        );
+      }
+    } catch (e) {
+      if (mounted) Navigator.pop(context);
+      Fluttertoast.showToast(
+          msg: "Error: $e", backgroundColor: Colors.red, textColor: Colors.white);
     }
   }
 
@@ -449,7 +615,8 @@ class _MainScreenState extends State<MainScreen> {
         height: height,
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(4), // Smaller radius for better performance
+          borderRadius: BorderRadius.circular(
+              4), // Smaller radius for better performance
         ),
       ),
     );
@@ -493,7 +660,7 @@ class _MainScreenState extends State<MainScreen> {
             ),
           ),
           const SizedBox(height: 30),
-          // Card with options - FIXED: Use Container instead of Card for shimmer
+          // Card with options
           Container(
             width: double.infinity,
             height: 112,
@@ -512,7 +679,7 @@ class _MainScreenState extends State<MainScreen> {
               children: [
                 // First option
                 Container(
-                  height: 56,
+                  height: 55,
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Row(
                     children: [
@@ -742,11 +909,14 @@ class _MainScreenState extends State<MainScreen> {
           child: ConstrainedBox(
             constraints: BoxConstraints(
               minHeight: MediaQuery.of(context).size.height -
-                  (kToolbarHeight + (MediaQuery.of(context).padding.top) + kBottomNavigationBarHeight),
+                  (kToolbarHeight +
+                      (MediaQuery.of(context).padding.top) +
+                      kBottomNavigationBarHeight),
             ),
             child: Container(
               // ADDED BOTTOM PADDING to prevent 1.00 pixel overflow
-              padding: const EdgeInsets.fromLTRB(24, 0, 24, 25), // Increased bottom padding to 25
+              padding: const EdgeInsets.fromLTRB(
+                  24, 0, 24, 25), // Increased bottom padding to 25
               child: _buildContent(),
             ),
           ),
@@ -757,7 +927,9 @@ class _MainScreenState extends State<MainScreen> {
 
   Widget _buildContent() {
     if (_isInitialLoad) {
-      return customer == null ? _buildLoginFormShimmer() : _buildProfileShimmer();
+      return customer == null
+          ? _buildLoginFormShimmer()
+          : _buildProfileShimmer();
     }
 
     return customer == null ? _buildLoginForm() : _buildProfileView();
@@ -777,7 +949,8 @@ class _MainScreenState extends State<MainScreen> {
                   width: 100,
                   height: 100,
                   decoration: BoxDecoration(
-                    color: CustomColorTheme.CustomPrimaryAppColor.withOpacity(0.1),
+                    color:
+                    CustomColorTheme.CustomPrimaryAppColor.withOpacity(0.1),
                     shape: BoxShape.circle,
                     border: Border.all(
                       color: CustomColorTheme.CustomPrimaryAppColor,
@@ -979,8 +1152,10 @@ class _MainScreenState extends State<MainScreen> {
           return _buildProfileShimmer();
         }
 
-        final logoutText = _dynamicContentCache.getProfileLogoutText() ?? 'Logout';
-        final logoutIconName = _dynamicContentCache.getProfileLogoutIcon() ?? 'logout';
+        final logoutText =
+            _dynamicContentCache.getProfileLogoutText() ?? 'Logout';
+        final logoutIconName =
+            _dynamicContentCache.getProfileLogoutIcon() ?? 'logout';
         final IconData logoutIcon = _getIconFromString(logoutIconName);
 
         return SingleChildScrollView(
@@ -995,7 +1170,8 @@ class _MainScreenState extends State<MainScreen> {
                       width: 120,
                       height: 120,
                       decoration: BoxDecoration(
-                        color: CustomColorTheme.CustomPrimaryAppColor.withOpacity(0.1),
+                        color:
+                        CustomColorTheme.CustomPrimaryAppColor.withOpacity(0.1),
                         shape: BoxShape.circle,
                         border: Border.all(
                           color: CustomColorTheme.CustomPrimaryAppColor,
@@ -1048,12 +1224,15 @@ class _MainScreenState extends State<MainScreen> {
                         height: 56, // Fixed height for consistent layout
                         child: _buildProfileOption(
                           icon: Icons.person_outline,
-                          title: _dynamicContentCache.getProfileAccountDetails() ?? 'Account Details',
+                          title:
+                          _dynamicContentCache.getProfileAccountDetails() ??
+                              'Account Details',
                           onTap: () {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (context) => ProfileDetailsScreen(customer: customer!),
+                                builder: (context) =>
+                                    ProfileDetailsScreen(customer: customer!),
                               ),
                             ).then((shouldReload) async {
                               if (shouldReload == true) {
@@ -1069,12 +1248,14 @@ class _MainScreenState extends State<MainScreen> {
                         height: 56, // Fixed height for consistent layout
                         child: _buildProfileOption(
                           icon: Icons.shopping_bag_outlined,
-                          title: _dynamicContentCache.getProfileMyOrders() ?? 'My Orders',
+                          title: _dynamicContentCache.getProfileMyOrders() ??
+                              'My Orders',
                           onTap: () {
                             Navigator.push(
                                 context,
                                 MaterialPageRoute(
-                                    builder: (context) => const MyOrdersScreen()));
+                                    builder: (context) =>
+                                    const MyOrdersScreen()));
                           },
                         ),
                       ),
@@ -1109,6 +1290,29 @@ class _MainScreenState extends State<MainScreen> {
                   ],
                 ),
               ),
+              // --- ADDED DELETE ACCOUNT BUTTON BELOW LOGOUT (LEFT SIDE) ---
+              const SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.start, // Aligns to left
+                children: [
+                  TextButton.icon(
+                    onPressed: () => _deleteAccount(context),
+                    icon: const Icon(Icons.delete_forever,
+                        size: 20, color: Colors.grey),
+                    label: const Text(
+                      "Delete Account",
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey,
+                      ),
+                    ),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 5),
+                    ),
+                  ),
+                ],
+              ),
               const SizedBox(height: 30),
             ],
           ),
@@ -1119,13 +1323,20 @@ class _MainScreenState extends State<MainScreen> {
 
   IconData _getIconFromString(String iconName) {
     switch (iconName.toLowerCase()) {
-      case 'logout': return Icons.logout;
-      case 'exit_to_app': return Icons.exit_to_app;
-      case 'power_settings_new': return Icons.power_settings_new;
-      case 'close': return Icons.close;
-      case 'cancel': return Icons.cancel;
-      case 'arrow_back': return Icons.arrow_back;
-      default: return Icons.logout;
+      case 'logout':
+        return Icons.logout;
+      case 'exit_to_app':
+        return Icons.exit_to_app;
+      case 'power_settings_new':
+        return Icons.power_settings_new;
+      case 'close':
+        return Icons.close;
+      case 'cancel':
+        return Icons.cancel;
+      case 'arrow_back':
+        return Icons.arrow_back;
+      default:
+        return Icons.logout;
     }
   }
 

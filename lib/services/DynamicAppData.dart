@@ -69,6 +69,8 @@ class DynamicAppData {
   final String? contactDetailsSubtitle;
   final String? contactDetailsTextButton;
   final String? homeFeaturedProducts;
+  final String? section1productsIDTitle;
+  final String? section2productsIDTitle;
   final String? homeHotDeals;
   final String? homePopularCollections;
   final String? shopTitle;
@@ -134,6 +136,8 @@ class DynamicAppData {
     this.contactDetailsSubtitle,
     this.singleImage,
     this.homeFeaturedProducts,
+    this.section1productsIDTitle,
+    this.section2productsIDTitle,
     this.homeHotDeals,
     this.homePopularCollections,
     this.shopTitle,
@@ -277,6 +281,8 @@ class DynamicAppData {
     final contactDetailsTitle = getTextValue('contact_details_title');
     final contactDetailsSubtitle = getTextValue('contact_details_subtitle');
     final homeFeaturedProducts = getTextValue('home_featured_products');
+    final section1productsIDTitle = getTextValue('section_1_collection_ID');
+    final section2productsIDTitle = getTextValue('section_2_collection_ID');
     final homeHotDeals = getTextValue('home_hot_deals');
     final homePopularCollections = getTextValue('home_popular_collections');
     final shopTitle = getTextValue('shop_title');
@@ -343,6 +349,8 @@ class DynamicAppData {
       contactDetailsTitle: contactDetailsTitle,
       contactDetailsSubtitle: contactDetailsSubtitle,
       homeFeaturedProducts: homeFeaturedProducts,
+      section1productsIDTitle: section1productsIDTitle,
+      section2productsIDTitle: section2productsIDTitle,
       homeHotDeals: homeHotDeals,
       homePopularCollections: homePopularCollections,
       shopTitle: shopTitle,
