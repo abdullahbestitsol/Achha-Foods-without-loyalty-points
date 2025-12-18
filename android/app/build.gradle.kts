@@ -30,11 +30,29 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("D:/Office Data/upload-keystore.jks")
+            storePassword = "12345678"
+            keyAlias = "upload"
+            keyPassword = "12345678"
+        }
+    }
+
     buildTypes {
-        release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+        getByName("release") {
+            // This is the most important line for Play Store
+            signingConfig = signingConfigs.getByName("release")
+
+            // Play Store likes these to be 'true' to make the app smaller,
+            // but set both to 'false' if you want to avoid errors for now.
+            isMinifyEnabled = true
+            isShrinkResources = true
+
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 }
