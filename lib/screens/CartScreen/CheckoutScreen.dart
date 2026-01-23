@@ -423,11 +423,32 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
                         if (_isLoggedIn && _savedAddresses.isNotEmpty)
                           DropdownButtonFormField<String>(
+                            isExpanded: true, // 1. Allow the dropdown to fill the width
                             value: _selectedAddressKey,
-                            decoration: const InputDecoration(labelText: "Select Saved Address", border: OutlineInputBorder()),
+                            decoration: const InputDecoration(
+                              labelText: "Select Saved Address",
+                              border: OutlineInputBorder(),
+                            ),
                             items: [
-                              ..._savedAddresses.map((addr) => DropdownMenuItem(value: addr['label'], child: Text(addr['address']!, overflow: TextOverflow.ellipsis))),
-                              const DropdownMenuItem(value: 'new_address_option', child: Text("Enter a new address")),
+                              ..._savedAddresses.map((addr) => DropdownMenuItem(
+                                value: addr['label'],
+                                // 2. Wrap the Text in a Row + Expanded to force constraints
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        addr['address']!,
+                                        overflow: TextOverflow.ellipsis, // 'ellipsis' is usually better for UX than 'clip'
+                                        maxLines: 1,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )),
+                              const DropdownMenuItem(
+                                value: 'new_address_option',
+                                child: Text("Enter a new address"),
+                              ),
                             ],
                             onChanged: (val) {
                               setState(() {

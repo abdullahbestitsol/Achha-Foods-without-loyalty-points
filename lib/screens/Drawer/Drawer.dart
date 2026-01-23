@@ -93,7 +93,7 @@ class _CustomDrawerState extends State<CustomDrawer> {
           // _buildLightDivider(),
 
           // Store - Dynamic Text
-          Center(child: Text('${dynamicCache.getDrawerDeliveryTextPrize()} ${dynamicCache.getDeliveryPrize()}',style: TextStyle(color: CustomColorTheme.CustomPrimaryAppColor,fontSize: 16,fontWeight: FontWeight.bold),)),
+          Center(child: Text('${dynamicCache.getDrawerDeliveryTextPrize()} ${dynamicCache.getDeliveryPrize()}',style: TextStyle(color: CustomColorTheme.CustomPrimaryAppColor,fontSize: 14,fontWeight: FontWeight.bold),)),
           SizedBox(height: 7,),
           _buildLightDivider(),
           _createDrawerItem(
