@@ -120,11 +120,12 @@ class DynamicContentCache extends ChangeNotifier {
     debugPrint("🧹 Cache cleared");
   }
 
-  // All getter methods remain the same...
   String? getFloatingBackgoundColor() => cachedData?.floatingBackgroundColor;
   String? getSingleImage() => cachedData?.singleImage;
   String? getContactUsEmail() => cachedData?.contactDetailsEmail;
   String? getContactUsTitle() => cachedData?.contactDetailsTitle;
+  String? getDeliveryPrize() => cachedData?.delivery_prize;
+  String? getDrawerDeliveryTextPrize() => cachedData?.drawer_delivery_text;
   String? getContactUsSubtitle() => cachedData?.contactDetailsSubtitle;
   String? getContactUsNumber() => cachedData?.contactDetailsNumber;
   String? getContactUsAddress() => cachedData?.contactDetailsAddress;

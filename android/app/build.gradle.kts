@@ -28,6 +28,8 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+//        manifestPlaceholders["appAuthRedirectScheme"] = "shop.69603295509.app"
+        manifestPlaceholders["appAuthRedirectScheme"] = "dummy.callback"
     }
 
     signingConfigs {

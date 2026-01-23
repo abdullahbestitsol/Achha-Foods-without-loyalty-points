@@ -39,6 +39,8 @@ class DynamicAppData {
   final List<BannerItem> bannerItems;
   final String? floatingBackgroundColor;
   final String? shopImageUrl;
+  final String? delivery_prize;
+  final String? drawer_delivery_text;
   final String? appBarImageUrl;
   final String? appBarIcon;
   final String? singleImage;
@@ -106,11 +108,13 @@ class DynamicAppData {
     required this.bannerItems,
     this.floatingBackgroundColor,
     this.shopImageUrl,
+    this.drawer_delivery_text,
     this.accountDetails_change_password_title,
     this.accountDetails_confirm_new_password,
     this.accountDetails_current_password,
     this.accountDetails_email,
     this.accountDetails_firstname,
+    this.delivery_prize,
     this.accountDetails_lastname,
     this.accountDetails_new_password,
     this.accountDetails_personal_information,
@@ -255,6 +259,8 @@ class DynamicAppData {
     final accountdetailsPersonalInformation = getTextValue('account_details_personal_information');
     final accountdetailsFirstname = getTextValue('account_details_firstname');
     final accountdetailsLastname = getTextValue('account_details_lastname');
+    final drawer_delivery_text = getTextValue('drawer_delivery_text');
+    final delivery_prize = getTextValue('delivery_prize');
     final accountdetailsEmail = getTextValue('account_details_email');
     final accountdetailsPhoneNumber = getTextValue('account_details_phone_number');
     final accountdetailsSavedShippingAddresses = getTextValue('account_details_saved_shipping_addresses');
@@ -320,10 +326,12 @@ class DynamicAppData {
       bannerItems: orderedItems,
       shopImageUrl: shopImageUrl,
       appBarImageUrl: appBarImageUrl,
+      drawer_delivery_text: drawer_delivery_text,
       appBarIcon: appBarIcon,
       accountDetails_text: accountdetailsText,
       accountDetails_personal_information: accountdetailsPersonalInformation,
       accountDetails_firstname: accountdetailsFirstname,
+      delivery_prize:delivery_prize,
       accountDetails_lastname: accountdetailsLastname,
       accountDetails_email: accountdetailsEmail,
       accountDetails_phone_number: accountdetailsPhoneNumber,

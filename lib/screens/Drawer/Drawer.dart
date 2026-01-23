@@ -1,3 +1,4 @@
+import 'package:achhafoods/screens/Consts/CustomColorTheme.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
@@ -58,7 +59,7 @@ class _CustomDrawerState extends State<CustomDrawer> {
 
   Widget _buildLightDivider() {
     return Divider(
-      height: 1,
+      height: 2,
       thickness: 1,
       color: _lightDividerColor,
       indent: 16.0,
@@ -92,6 +93,9 @@ class _CustomDrawerState extends State<CustomDrawer> {
           // _buildLightDivider(),
 
           // Store - Dynamic Text
+          Center(child: Text('${dynamicCache.getDrawerDeliveryTextPrize()} ${dynamicCache.getDeliveryPrize()}',style: TextStyle(color: CustomColorTheme.CustomPrimaryAppColor,fontSize: 16,fontWeight: FontWeight.bold),)),
+          SizedBox(height: 7,),
+          _buildLightDivider(),
           _createDrawerItem(
             icon: Icons.store,
             text: dynamicCache.getSidebarStore() ?? 'Store',

@@ -9,8 +9,10 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:achhafoods/screens/CartScreen/ThankYouScreen.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/CartServices.dart';
+import '../../services/DynamicContentCache.dart';
 import '../Consts/shopify_auth_service.dart';
 
 class CheckoutScreen extends StatefulWidget {
@@ -39,26 +41,16 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _discountCodeController = TextEditingController();
   final TextEditingController _noteController = TextEditingController();
-
-  // --- COUPON STATE ---
   final TextEditingController _couponCodeController = TextEditingController();
   String? _customDiscountCode;
   double _couponDiscountValue = 0.0;
-  String _couponValueType = 'fixed_amount';
-  // --------------------
+  double _deliveryCharges = 0.0;
 
   Map<String, dynamic>? customer;
-  Map<String, dynamic>? laravelUser;
-  final bool _isCodSelected = true;
   bool _isLoading = false;
-  bool _useLoyaltyPoints = false;
-  int _loyaltyPoints = 0;
-  // NEW: Monetary value of available loyalty points (assuming 1 point = 1 unit of currency)
-  double _loyaltyDiscountValue = 0.0;
   bool _isLoggedIn = false;
 
   late double _finalAmount;
-  bool _hasAppliedDiscount = false;
   bool _discountApplied = false;
 
   final List<Map<String, String>> _savedAddresses = [];
@@ -68,13 +60,16 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   void initState() {
     super.initState();
     _checkLoginStatusAndLoadInfo();
-    _finalAmount = widget.finalAmount;
 
     if (widget.discountCode != null && widget.discountCode!.isNotEmpty) {
       _discountCodeController.text = widget.discountCode!;
-      _discountApplied = true;
-      _hasAppliedDiscount = true;
+      _customDiscountCode = widget.discountCode;
+      if (widget.originalAmount > widget.finalAmount) {
+        _couponDiscountValue = widget.originalAmount - widget.finalAmount;
+      }
     }
+
+    _recalculateFinalAmount();
   }
 
   @override
@@ -89,16 +84,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     super.dispose();
   }
 
-  // --- Core API and Data Loading Logic ---
-
   Future<void> _checkLoginStatusAndLoadInfo() async {
     final prefs = await SharedPreferences.getInstance();
-    final laravelUserJson = prefs.getString('laravelUser');
-    if (laravelUserJson != null) {
-      setState(() {
-        _isLoggedIn = true;
-      });
-      await _loadCustomerInfo();
+    final customerJson = prefs.getString('shopifyCustomer') ?? prefs.getString('customer');
+
+    if (customerJson != null) {
+      setState(() => _isLoggedIn = true);
+      _loadCustomerInfoFromLocal(customerJson);
     } else {
       setState(() {
         _isLoggedIn = false;
@@ -107,107 +99,49 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     }
   }
 
-  Future<Map<String, dynamic>?> _fetchUserDataWithGetAndBody(String email ) async {
-    final uri = Uri.parse('$localurl/api/user-by-email');
-    final body = json.encode({"email": email});
-
-    final request = http.Request('GET', uri)
-      ..headers.addAll({
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        // if (token != null) 'Authorization': 'Bearer $token',
-      })
-      ..body = body;
-
+  void _loadCustomerInfoFromLocal(String jsonString) {
     try {
-      final streamedResponse = await http.Client().send(request);
-      final response = await http.Response.fromStream(streamedResponse);
+      final data = json.decode(jsonString);
+      final cust = data['customer'];
 
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> responseData = json.decode(response.body);
-        if (kDebugMode) print("API User Data (GET with Body): $responseData");
-        return responseData;
-      } else {
-        if (kDebugMode) {
-          print("Failed to fetch user data (GET with Body): ${response.statusCode} - ${response.body}");
+      if (cust != null) {
+        _emailController.text = cust['email'] ?? '';
+        _nameController.text = '${cust['firstName'] ?? ''} ${cust['lastName'] ?? ''}'.trim();
+        _phoneController.text = cust['phone'] ?? '';
+
+        List<dynamic> addresses = [];
+        if (cust['addresses'] != null) {
+          addresses = (cust['addresses'] is List) ? cust['addresses'] : (cust['addresses']['nodes'] ?? []);
         }
-        return null;
+
+        _savedAddresses.clear();
+        for (var addr in addresses) {
+          List<String> parts = [];
+          if (addr['address1'] != null) parts.add(addr['address1']);
+          if (addr['city'] != null) parts.add(addr['city']);
+          if (addr['zip'] != null) parts.add(addr['zip']);
+          if (addr['country'] != null) parts.add(addr['country']);
+
+          String fullStr = parts.join(', ');
+          if (fullStr.isNotEmpty) {
+            _savedAddresses.add({'label': addr['id']?.toString() ?? addr['address1'], 'address': fullStr});
+          }
+        }
+
+        setState(() {
+          if (_savedAddresses.isNotEmpty) {
+            _selectedAddressKey = _savedAddresses.first['label'];
+            _addressController.text = _savedAddresses.first['address']!;
+          } else {
+            _selectedAddressKey = 'new_address_option';
+          }
+        });
       }
     } catch (e) {
-      if (kDebugMode) print("Error fetching user data (GET with Body): $e");
-      return null;
+      if (kDebugMode) print("Error parsing customer data: $e");
     }
   }
 
-  void _populateAddressControllers(String fullAddress) {
-    _addressController.text = fullAddress;
-  }
-
-  Future<void> _loadCustomerInfo() async {
-    final prefs = await SharedPreferences.getInstance();
-    final customerData = prefs.getString('customer');
-    final laravelUserData = prefs.getString('laravelUser');
-    // final String? laravelToken = prefs.getString('laravelToken');
-
-    if (customerData != null && laravelUserData != null) {
-      setState(() {
-        customer = json.decode(customerData);
-        laravelUser = json.decode(laravelUserData);
-        final customerDetails = customer?['customer'] as Map<String, dynamic>?;
-        if (customerDetails != null) {
-          _emailController.text = customerDetails['email'] ?? '';
-          _nameController.text = '${customerDetails['firstName'] ?? ''} ${customerDetails['lastName'] ?? ''}'.trim();
-          _phoneController.text = laravelUser!['phone'] ?? '';
-        }
-      });
-
-      if (_emailController.text.isNotEmpty) {
-        final responseData = await _fetchUserDataWithGetAndBody(_emailController.text);
-
-        final userData = responseData?['data'] as Map<String, dynamic>?;
-
-        if (responseData?['status'] == true && userData != null) {
-          final Map<String, dynamic>? addressesMap = userData['full_addresses'];
-          final int loyaltyPoints = userData['loyalty_points'] ?? 0;
-
-          setState(() {
-            _loyaltyPoints = loyaltyPoints;
-            // Assuming 1 point = 1 currency unit
-            _loyaltyDiscountValue = loyaltyPoints.toDouble();
-            _savedAddresses.clear();
-
-            if (addressesMap != null) {
-              addressesMap.forEach((label, fullAddress) {
-                _savedAddresses.add({
-                  'label': label,
-                  'address': fullAddress.toString(),
-                });
-              });
-            }
-
-            if (_savedAddresses.isNotEmpty) {
-              _selectedAddressKey = _savedAddresses.first['label'];
-              _populateAddressControllers(_savedAddresses.first['address']!);
-            } else {
-              _selectedAddressKey = 'new_address_option';
-              _addressController.clear();
-            }
-
-            _isLoggedIn = true;
-            _recalculateFinalAmount();
-          });
-        }
-      }
-    } else {
-      setState(() {
-        _isLoggedIn = false;
-        _selectedAddressKey = 'new_address_option';
-        _addressController.clear();
-      });
-    }
-  }
-
-  // --- UPDATED: Coupon Validity Check (removed loyalty override) ---
   Future<void> _checkCouponValidity() async {
     final couponCode = _couponCodeController.text.trim();
     if (couponCode.isEmpty) {
@@ -221,116 +155,125 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       final validationResult = await ShopifyAuthService.validateShopifyDiscountCode(couponCode);
 
       if (validationResult['valid'] == true) {
-        final double value = validationResult['value'] as double;
+        final double value = (validationResult['value'] as num).toDouble();
         final String type = validationResult['value_type'] as String;
 
-        // Calculate the actual discount amount
-        double discountAmount;
+        double calculatedDiscount;
         if (type == 'percentage') {
-          discountAmount = widget.originalAmount * (value / 100);
+          calculatedDiscount = widget.originalAmount * (value / 100);
         } else {
-          // fixed_amount
-          discountAmount = value;
+          calculatedDiscount = value;
         }
 
-        // Ensure discount doesn't exceed order total
-        discountAmount = discountAmount.clamp(0.0, widget.originalAmount);
-
         setState(() {
-          _couponDiscountValue = discountAmount;
-          _couponValueType = type;
           _customDiscountCode = couponCode;
-          // IMPORTANT: Loyalty is no longer set to false here, allowing both to stack.
+          _couponDiscountValue = calculatedDiscount;
+          _discountCodeController.text = couponCode;
           _recalculateFinalAmount();
         });
 
-        Fluttertoast.showToast(
-          msg: "Coupon applied successfully! Discount: Rs. ${discountAmount.toStringAsFixed(2)}",
-          backgroundColor: Colors.green,
-          toastLength: Toast.LENGTH_LONG,
-        );
+        Fluttertoast.showToast(msg: "Coupon Applied!", backgroundColor: Colors.green);
       } else {
-        setState(() {
-          _couponDiscountValue = 0.0;
-          _customDiscountCode = null;
-          _recalculateFinalAmount();
-        });
-        Fluttertoast.showToast(
-            msg: validationResult['message'] ?? "Invalid coupon code",
-            backgroundColor: Colors.red
-        );
+        Fluttertoast.showToast(msg: validationResult['message'] ?? "Invalid code", backgroundColor: Colors.red);
       }
     } catch (e) {
-      if (kDebugMode) print("Error checking coupon: $e");
-      Fluttertoast.showToast(msg: "Error during coupon validation.");
+      Fluttertoast.showToast(msg: "Error validating coupon");
     } finally {
       setState(() => _isLoading = false);
     }
   }
 
-  // --- Remove Coupon ---
+  void _recalculateFinalAmount() {
+    // Access provider inside the method
+    final dynamicCache = Provider.of<DynamicContentCache>(context, listen: false);
+
+    setState(() {
+      double discountToApply = _couponDiscountValue.clamp(0.0, widget.originalAmount);
+      double subTotal = widget.originalAmount - discountToApply;
+
+      // 1. Get the dynamic threshold from cache (e.g., "850")
+      // If cache is empty or invalid, it defaults to 850.0
+      double freeDeliveryThreshold = double.tryParse(dynamicCache.getDeliveryPrize() ?? '') ?? 850.0;
+
+      // 2. Use the dynamic threshold to decide if we apply the static 200 charge
+      if (subTotal < freeDeliveryThreshold) {
+        _deliveryCharges = 200.0; // Static charge
+      } else {
+        _deliveryCharges = 0.0;
+      }
+
+      _finalAmount = subTotal + _deliveryCharges;
+      _discountApplied = discountToApply > 0;
+    });
+  }
+
   void _removeCoupon() {
     setState(() {
       _couponCodeController.clear();
-      _couponDiscountValue = 0.0;
       _customDiscountCode = null;
+      _couponDiscountValue = 0.0;
+      _discountCodeController.clear();
       _recalculateFinalAmount();
     });
     Fluttertoast.showToast(msg: "Coupon removed");
   }
 
+  Future<String?> _createDraftOrder(String? code, double discount) async {
+    final lineItems = widget.cartItems.map((p) => {
+      "variant_id": p.variantId.split('/').last,
+      "quantity": p.quantity,
+    }).toList();
 
-  // --- UPDATED: Recalculate function to handle both discounts combined ---
-  void _recalculateFinalAmount() {
-    double couponDiscount = _customDiscountCode != null ? _couponDiscountValue : 0.0;
-    double loyaltyDiscount = 0.0;
-    String appliedCodeDescription = "";
+    Map<String, dynamic> payload = {
+      "draft_order": {
+        "line_items": lineItems,
+        "email": _emailController.text,
+        "note": _noteController.text,
+        "shipping_address": {
+          "first_name": _nameController.text,
+          "address1": _addressController.text,
+          "city": "Lahore",
+          "country": "Pakistan",
+          "phone": _phoneController.text
+        },
+        "use_customer_default_address": false,
+        "tags": "mobile-app, COD",
+        "shipping_line": {
+          "title": _deliveryCharges > 0 ? "Standard Delivery" : "Free Delivery",
+          "price": _deliveryCharges.toStringAsFixed(2),
+          "code": _deliveryCharges > 0 ? "STD" : "FREE"
+        }
+      }
+    };
 
-    // 1. Calculate Loyalty Discount (if toggle is on)
-    if (_isLoggedIn && _useLoyaltyPoints && _loyaltyPoints > 0) {
-      // Loyalty discount is the value of points, capped at the remaining amount
-      // Since we combine them for Shopify, we can cap them at the original amount for display
-      loyaltyDiscount = _loyaltyDiscountValue.clamp(0.0, widget.originalAmount);
-      appliedCodeDescription = "Loyalty Points";
+    if (code != null && discount > 0) {
+      payload["draft_order"]["applied_discount"] = {
+        "description": "Coupon: $code",
+        "value": discount.toStringAsFixed(2),
+        "value_type": "fixed_amount",
+        "title": code
+      };
     }
 
-    // 2. Calculate Coupon Discount and combine code description
-    if (couponDiscount > 0) {
-      if (appliedCodeDescription.isNotEmpty) {
-        appliedCodeDescription = "COUPON (${_customDiscountCode!}) + $appliedCodeDescription";
-      } else {
-        appliedCodeDescription = _customDiscountCode!;
-      }
+    final response = await http.post(
+      Uri.parse('https://$shopifyStoreUrl_const/admin/api/$adminApiVersion_const/draft_orders.json'),
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Shopify-Access-Token': adminAccessToken_const
+      },
+      body: json.encode(payload),
+    );
+
+    if (response.statusCode == 201) {
+      return json.decode(response.body)['draft_order']['id'].toString();
+    } else {
+      return null;
     }
-
-    double totalDiscount = couponDiscount + loyaltyDiscount;
-
-    // The total discount must be capped at the original price
-    totalDiscount = totalDiscount.clamp(0.0, widget.originalAmount);
-
-    _finalAmount = (widget.originalAmount - totalDiscount);
-
-    setState(() {
-      _discountApplied = totalDiscount > 0;
-      _hasAppliedDiscount = totalDiscount > 0;
-
-      if (appliedCodeDescription.isNotEmpty) {
-        _discountCodeController.text = appliedCodeDescription;
-      } else if (widget.discountCode != null && widget.discountCode!.isNotEmpty) {
-        // Fallback to original discount if no custom one is applied
-        _discountCodeController.text = widget.discountCode!;
-        _finalAmount = widget.finalAmount;
-      } else {
-        _discountCodeController.clear();
-        _finalAmount = widget.originalAmount;
-      }
-    });
   }
 
   @override
   Widget build(BuildContext context) {
-    // Calculate the total discount value for the display
-    double totalAppliedDiscountValue = widget.originalAmount - _finalAmount;
+    double displayDiscountValue = _discountApplied ? _couponDiscountValue : 0.0;
 
     return Stack(
       children: [
@@ -339,22 +282,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           drawer: const CustomDrawer(),
           bottomNavigationBar: const NewNavigationBar(),
           body: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
                 width: double.infinity,
                 color: CustomColorTheme.CustomPrimaryAppColor,
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 alignment: Alignment.center,
-                child: const Text(
-                  "Checkout",
-                  style: TextStyle(
-                    fontSize: 20,
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.5,
-                  ),
-                ),
+                child: const Text("Checkout", style: TextStyle(fontSize: 20, color: Colors.white, fontWeight: FontWeight.bold)),
               ),
               Expanded(
                 child: SingleChildScrollView(
@@ -364,357 +298,188 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // --- Order Summary ---
-                        const SizedBox(height: 12),
-                        const Text(
-                          "Order Summary:",
-                          style: TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.bold),
-                        ),
+                        const Text("Order Summary:", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                         const SizedBox(height: 8),
-                        ...widget.cartItems.map((product) => Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Flexible(
-                              child: Text(
-                                  "${product.title} (x${product.quantity})"),
-                            ),
-                            Text(
-                              "Rs. ${(product.price * product.quantity).toStringAsFixed(2)}",
-                            ),
-                          ],
+                        ...widget.cartItems.map((product) => Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Flexible(child: Text("${product.title} (x${product.quantity})")),
+                              Text("Rs. ${(product.price * product.quantity).toStringAsFixed(2)}"),
+                            ],
+                          ),
                         )),
 
-                        // Discount Display
-                        if (_discountApplied && _finalAmount < widget.originalAmount)
+                        if (_discountApplied)
                           Padding(
                             padding: const EdgeInsets.only(top: 8.0),
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                // Show the combined discount description
-                                Flexible(
-                                  child: Text(
-                                    "Discount (${_discountCodeController.text}):",
-                                    style: TextStyle(
-                                      color: Colors.green.shade600,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                                Row(
-                                  children: [
-                                    Text(
-                                      "- Rs. ${totalAppliedDiscountValue.toStringAsFixed(2)}",
-                                      style: TextStyle(
-                                        color: Colors.green.shade600,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                    if (_customDiscountCode != null)
-                                      IconButton(
-                                        icon: const Icon(Icons.close, size: 16),
-                                        onPressed: _removeCoupon,
-                                        padding: EdgeInsets.zero,
-                                        constraints: const BoxConstraints(),
-                                      ),
-                                  ],
-                                ),
+                                Text("Discount (${_discountCodeController.text}):", style: TextStyle(color: Colors.green.shade700, fontWeight: FontWeight.bold)),
+                                Text("- Rs. ${displayDiscountValue.toStringAsFixed(2)}", style: TextStyle(color: Colors.green.shade700, fontWeight: FontWeight.bold)),
                               ],
                             ),
                           ),
+
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8.0),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text("Delivery Charges:", style: TextStyle(fontWeight: FontWeight.w500)),
+                              Text(
+                                _deliveryCharges > 0
+                                    ? "Rs. ${_deliveryCharges.toStringAsFixed(2)}"
+                                    : "Free",
+                                style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: _deliveryCharges > 0 ? Colors.black : Colors.green
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
                         const Divider(),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text(
-                              "Grand Total:",
-                              style: TextStyle(
-                                  fontSize: 18, fontWeight: FontWeight.bold),
-                            ),
-                            Text(
-                              "Rs. ${_finalAmount.toStringAsFixed(2)}",
-                              style: const TextStyle(
-                                  fontSize: 18, fontWeight: FontWeight.bold),
-                            ),
+                            const Text("Grand Total:", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                            Text("Rs. ${_finalAmount.toStringAsFixed(2)}", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                           ],
                         ),
                         const SizedBox(height: 20),
 
-                        // --- COUPON CODE SECTION ---
                         Container(
                           padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            border: Border.all(color: Colors.grey.shade300),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
+                          decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
-                                "Apply Coupon",
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
+                              const Text("Apply Coupon", style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
                               const SizedBox(height: 8),
                               Row(
                                 children: [
                                   Expanded(
                                     child: TextFormField(
                                       controller: _couponCodeController,
-                                      decoration: InputDecoration(
-                                        labelText: "Enter coupon code",
-                                        hintText: "e.g., check100",
-                                        border: const OutlineInputBorder(),
-                                        enabled: !_isLoading && _customDiscountCode == null,
-                                        suffixIcon: _customDiscountCode != null
-                                            ? IconButton(
-                                          icon: const Icon(Icons.check_circle, color: Colors.green),
-                                          onPressed: null,
-                                        )
-                                            : null,
-                                      ),
-                                      onChanged: (value) {
-                                        if (_customDiscountCode != null && value.trim() != _customDiscountCode) {
-                                          setState(() {
-                                            _couponDiscountValue = 0.0;
-                                            _customDiscountCode = null;
-                                            _recalculateFinalAmount();
-                                          });
-                                        }
-                                      },
+                                      decoration: const InputDecoration(hintText: "Enter code", border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 10)),
+                                      enabled: _customDiscountCode == null,
                                     ),
                                   ),
                                   const SizedBox(width: 8),
-                                  SizedBox(
-                                    height: 60,
-                                    child: _customDiscountCode != null
-                                        ? ElevatedButton(
-                                      onPressed: _removeCoupon,
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.red,
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(8),
-                                        ),
-                                      ),
-                                      child: const Text(
-                                        'Remove',
-                                        style: TextStyle(color: Colors.white),
-                                      ),
-                                    )
-                                        : ElevatedButton(
-                                      onPressed: _isLoading ? null : _checkCouponValidity,
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.black,
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(8),
-                                        ),
-                                      ),
-                                      child: Text(
-                                        _isLoading ? '...' : 'Apply',
-                                        style: const TextStyle(color: Colors.white),
-                                      ),
-                                    ),
+                                  ElevatedButton(
+                                    onPressed: _isLoading ? null : (_customDiscountCode != null ? _removeCoupon : _checkCouponValidity),
+                                    style: ElevatedButton.styleFrom(backgroundColor: _customDiscountCode != null ? Colors.red : Colors.black),
+                                    child: Text(_customDiscountCode != null ? "Remove" : "Apply", style: const TextStyle(color: Colors.white)),
                                   ),
                                 ],
                               ),
-                              if (_customDiscountCode != null)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 8.0),
-                                  child: Text(
-                                    "Coupon applied: ${_couponValueType == 'percentage' ? '${_couponDiscountValue.toStringAsFixed(2)}%' : 'Rs. ${_couponDiscountValue.toStringAsFixed(2)}'} off",
-                                    style: const TextStyle(
-                                      color: Colors.green,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ),
                             ],
                           ),
                         ),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 20),
 
-                        // --- Billing/Contact Info Fields ---
+                        // --- REQUIRED FIELD: NAME ---
                         TextFormField(
                           controller: _nameController,
-                          decoration:
-                          const InputDecoration(labelText: "Full Name"),
-                          validator: (value) =>
-                          value!.isEmpty ? "Name is required" : null,
+                          decoration: const InputDecoration(labelText: "Full Name*", border: OutlineInputBorder()),
+                          validator: (v) {
+                            if (v == null || v.trim().isEmpty) return "Full Name is required";
+                            return null;
+                          },
                         ),
                         const SizedBox(height: 12),
+
+                        // --- REQUIRED FIELD: EMAIL ---
                         TextFormField(
                           controller: _emailController,
-                          decoration:
-                          const InputDecoration(labelText: "Email Address"),
                           keyboardType: TextInputType.emailAddress,
-                          validator: (value) {
-                            if (value!.isEmpty) return "Email is required";
-                            if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$')
-                                .hasMatch(value)) {
-                              return "Enter valid email";
+                          decoration: const InputDecoration(labelText: "Email Address*", border: OutlineInputBorder()),
+                          validator: (v) {
+                            if (v == null || v.trim().isEmpty) return "Email is required";
+                            if (!RegExp(r"^[a-zA-Z0-9.a-zA-Z0-9.!#$%&'*+-/=?^_`{|}~]+@[a-zA-Z0-9]+\.[a-zA-Z]+").hasMatch(v)) {
+                              return "Please enter a valid email address";
                             }
                             return null;
                           },
                         ),
                         const SizedBox(height: 12),
+
+                        // --- REQUIRED FIELD: PHONE ---
                         TextFormField(
                           controller: _phoneController,
-                          decoration:
-                          const InputDecoration(labelText: "Phone Number"),
                           keyboardType: TextInputType.phone,
-                          validator: (value) =>
-                          value!.isEmpty ? "Phone is required" : null,
+                          decoration: const InputDecoration(labelText: "Phone Number*", border: OutlineInputBorder()),
+                          validator: (v) {
+                            if (v == null || v.trim().isEmpty) return "Phone number is required";
+                            if (v.trim().length < 7) return "Please enter a valid phone number";
+                            return null;
+                          },
                         ),
                         const SizedBox(height: 12),
-                        if (_isLoggedIn && _savedAddresses.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 12.0),
-                            child: DropdownButtonFormField<String>(
-                              decoration: const InputDecoration(
-                                labelText: 'Select Shipping Address',
-                                border: OutlineInputBorder(
-                                  borderSide: BorderSide(color: Colors.black),
-                                ),
-                              ),
-                              initialValue: _selectedAddressKey,
-                              items: [
-                                ..._savedAddresses.map((addr) => DropdownMenuItem(
-                                  value: addr['label'],
-                                  // --- START FIX ---
-                                  child: SizedBox(
-                                    // Constrain the width of the Text widget within the dropdown item
-                                    // The constraint should be the width of the screen minus padding.
-                                    // Using a FractionallySizedBox set to 0.8 or 0.9 of the available width is safer.
-                                    // Using MediaQuery.of(context).size.width * 0.75 as a safe constraint.
-                                    width: MediaQuery.of(context).size.width * 0.75,
-                                    child: Text(
-                                        '${addr['label']!}: ${addr['address']!}',
-                                        overflow: TextOverflow.ellipsis // Ellipsis will now correctly apply
-                                    ),
-                                  ),
-                                  // --- END FIX ---
-                                )),
-                                const DropdownMenuItem(
-                                  value: 'new_address_option',
-                                  child: Text('➕ Write a New Address'),
-                                ),
-                              ],
-                              onChanged: (String? newValue) {
-                                setState(() {
-                                  _selectedAddressKey = newValue;
-                                  if (newValue == 'new_address_option') {
-                                    _addressController.clear();
-                                  } else {
-                                    final selected = _savedAddresses.firstWhere((addr) => addr['label'] == newValue);
-                                    _populateAddressControllers(selected['address']!);
-                                  }
-                                });
-                              },
-                              validator: (value) =>
-                              value == null ? "Please select an address" : null,
-                            ),
-                          ),
 
-// The TextFormField below this is now correct and should not cause overflow.
+                        if (_isLoggedIn && _savedAddresses.isNotEmpty)
+                          DropdownButtonFormField<String>(
+                            value: _selectedAddressKey,
+                            decoration: const InputDecoration(labelText: "Select Saved Address", border: OutlineInputBorder()),
+                            items: [
+                              ..._savedAddresses.map((addr) => DropdownMenuItem(value: addr['label'], child: Text(addr['address']!, overflow: TextOverflow.ellipsis))),
+                              const DropdownMenuItem(value: 'new_address_option', child: Text("Enter a new address")),
+                            ],
+                            onChanged: (val) {
+                              setState(() {
+                                _selectedAddressKey = val;
+                                if (val != 'new_address_option') {
+                                  _addressController.text = _savedAddresses.firstWhere((e) => e['label'] == val)['address']!;
+                                } else {
+                                  _addressController.clear();
+                                }
+                              });
+                            },
+                          ),
+                        const SizedBox(height: 12),
+
+                        // --- REQUIRED FIELD: ADDRESS ---
                         TextFormField(
                           controller: _addressController,
-                          decoration: InputDecoration(
-                              labelText: _selectedAddressKey == 'new_address_option' || !_isLoggedIn || _savedAddresses.isEmpty
-                                  ? "Full Shipping Address (Required)"
-                                  : "Selected Address"
-                          ),
-                          maxLines: 3,
-                          validator: (value) =>
-                          value!.isEmpty ? "Address is required" : null,
-                          enabled: _selectedAddressKey == 'new_address_option' || !_isLoggedIn || _savedAddresses.isEmpty,
-                          keyboardType: TextInputType.streetAddress,
+                          decoration: const InputDecoration(labelText: "Shipping Address Details*", border: OutlineInputBorder()),
+                          maxLines: 2,
+                          enabled: _selectedAddressKey == 'new_address_option' || !_isLoggedIn,
+                          validator: (v) {
+                            if (v == null || v.trim().isEmpty) return "Shipping address is required";
+                            return null;
+                          },
                         ),
-                        const SizedBox(height: 20),
-                        // --- Order Note field ---
+
+                        const SizedBox(height: 12),
                         TextFormField(
                           controller: _noteController,
                           decoration: const InputDecoration(
-                            labelText: "Order Note (Optional)",
-                            hintText: "Note...",
+                            labelText: "Order Notes (Optional)",
                             border: OutlineInputBorder(),
+                            alignLabelWithHint: true,
                           ),
-                          maxLines: 1,
+                          maxLines: 3,
                         ),
-                        // const SizedBox(height: 20),
-                        //
-                        // // --- Loyalty Points Toggle (Always enabled if points available) ---
-                        // if (_isLoggedIn)
-                        //   Container(
-                        //     padding: const EdgeInsets.all(12),
-                        //     decoration: BoxDecoration(
-                        //       border: Border.all(color: Colors.grey.shade300),
-                        //       borderRadius: BorderRadius.circular(8),
-                        //     ),
-                        //     child: SwitchListTile(
-                        //       title: const Text(
-                        //         "Use Loyalty Points",
-                        //         style: TextStyle(fontWeight: FontWeight.bold),
-                        //       ),
-                        //       subtitle: Text(
-                        //         // Show monetary value for clarity
-                        //         "Available: $_loyaltyPoints points (Rs. ${_loyaltyDiscountValue.toStringAsFixed(2)})",
-                        //         style: TextStyle(
-                        //           color: _loyaltyPoints >= 100 ? Colors.green : Colors.grey,
-                        //         ),
-                        //       ),
-                        //       value: _useLoyaltyPoints,
-                        //       onChanged: (_loyaltyPoints < 100)
-                        //           ? (val) {
-                        //         Fluttertoast.showToast(
-                        //           msg: "You need at least 100 loyalty points to use them.",
-                        //           backgroundColor: Colors.red,
-                        //           toastLength: Toast.LENGTH_LONG,
-                        //         );
-                        //       }
-                        //           : (val) {
-                        //         setState(() {
-                        //           _useLoyaltyPoints = val;
-                        //           _recalculateFinalAmount();
-                        //         });
-                        //       },
-                        //       activeThumbColor: Colors.black,
-                        //       inactiveThumbColor: Colors.grey.shade300,
-                        //       inactiveTrackColor: Colors.grey.shade100,
-                        //       // No longer disabled if coupon is present
-                        //       tileColor: null,
-                        //     ),
-                        //   ),
 
                         const SizedBox(height: 20),
+
                         SizedBox(
                           width: double.infinity,
                           child: ElevatedButton(
-                            onPressed: _isLoading
-                                ? null
-                                : () {
-                              FocusScope.of(context).unfocus();
+                            onPressed: _isLoading ? null : () {
+                              // Validates all fields using the Form key
                               if (_formKey.currentState!.validate()) {
                                 _placeOrderDirectly();
+                              } else {
+                                Fluttertoast.showToast(msg: "Please fill all required fields correctly");
                               }
                             },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.red,
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                            child: const Text(
-                              "Place Order",
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
+                            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, padding: const EdgeInsets.symmetric(vertical: 16)),
+                            child: const Text("Place Order", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
                           ),
                         )
                       ],
@@ -725,386 +490,47 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             ],
           ),
         ),
-        if (_isLoading)
-          Container(
-            color: Colors.black.withOpacity(0.5),
-            child: const Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CircularProgressIndicator(color: Colors.white),
-                  SizedBox(height: 12),
-                  Text(
-                    "Processing...",
-                    style: TextStyle(color: Colors.white, fontSize: 16),
-                  ),
-                ],
-              ),
-            ),
-          ),
+        if (_isLoading) const Center(child: CircularProgressIndicator()),
       ],
     );
   }
 
-  // --- UPDATED: Order Processing Logic for Combined Discount ---
-
   Future<void> _placeOrderDirectly() async {
     setState(() => _isLoading = true);
-
-    String? redeemedCode;
-    int? redeemedPoints = 0;
-    double loyaltyDiscountRedeemed = 0.0;
-
-    // Start with coupon discount and code
-    double finalDiscountValue = _couponDiscountValue;
-    String finalDiscountCode = _customDiscountCode ?? "";
-
-    final prefs = await SharedPreferences.getInstance();
-    final laravelUserJson = prefs.getString('laravelUser');
-    final bool isLoggedIn = laravelUserJson != null;
-
-    // --- STEP 1: Redeem Loyalty Points (if toggled) ---
-    if (isLoggedIn && _useLoyaltyPoints && _loyaltyPoints > 0) {
-
-      // Calculate how much discount is attributed to loyalty points based on the final price calculation
-      double totalDiscountApplied = widget.originalAmount - _finalAmount;
-
-      // Discount provided by coupon:
-      double couponValue = _customDiscountCode != null ? _couponDiscountValue : 0.0;
-
-      // Loyalty's actual contribution to the final discount
-      double loyaltyContribution = totalDiscountApplied - couponValue;
-
-      // If loyalty contributed something (it might be less than _loyaltyDiscountValue if clipped by order total)
-      if (loyaltyContribution > 0) {
-        final redeemUri = Uri.parse('$localurl/api/points/redeem');
-        // final token = prefs.getString('laravelToken');
-        // if (token == null) {
-        //   Fluttertoast.showToast(msg: "Please log in first");
-        //   setState(() => _isLoading = false);
-        //   return;
-        // }
-
-        // We redeem points corresponding to the monetary value contributed
-        final pointsToRedeem = (_loyaltyPoints < widget.finalAmount)
-            ? _loyaltyPoints
-            : widget.finalAmount.toInt();
-        print('Points to redeem: $pointsToRedeem');
-
-
-        if (pointsToRedeem > 0) {
-          try {
-            final redeemResponse = await http.post(
-              redeemUri,
-              headers: {
-                // 'Authorization': 'Bearer $token',
-                'Content-Type': 'application/json',
-              },
-              body: json.encode({"points_to_redeem": pointsToRedeem}),
-            );
-
-            if (redeemResponse.statusCode == 200) {
-              final redeemData = json.decode(redeemResponse.body);
-              loyaltyDiscountRedeemed = (redeemData['data']['discount_value'] as num).toDouble();
-              redeemedCode = redeemData['data']['redemption_code'];
-              redeemedPoints = pointsToRedeem;
-
-              // Only update if redemption was successful
-              finalDiscountValue += loyaltyDiscountRedeemed;
-              finalDiscountCode = (finalDiscountCode.isEmpty) ? "LOYALTY" : "COUPON+LOYALTY";
-
-            } else {
-              if (kDebugMode) {
-                print("Failed to redeem points: ${redeemResponse.body}");
-              }
-              Fluttertoast.showToast(msg: "Failed to redeem points");
-              // Continue processing without loyalty discount if redemption failed
-            }
-          } catch (e) {
-            if (kDebugMode) {
-              print("Error during point redemption: $e");
-            }
-            Fluttertoast.showToast(msg: "Error during point redemption");
-            // Continue processing without loyalty discount if API call failed
-          }
-        }
-      }
-    }
-
-    // --- STEP 2: Handle Original Widget Discount (Fallback if no custom discount applied) ---
-    if (finalDiscountCode.isEmpty && widget.discountCode != null && widget.discountCode!.isNotEmpty) {
-      finalDiscountCode = widget.discountCode!;
-      finalDiscountValue = widget.originalAmount - widget.finalAmount;
-    }
-
-
     try {
-      String? userId;
-      if (isLoggedIn) {
-        final laravelUser = json.decode(laravelUserJson);
-        userId = laravelUser['id'].toString();
-      }
-
-      // Create Draft Order with combined discount (Shopify only accepts one discount object)
-      final draftOrderId = await _createDraftOrder(
-        finalDiscountCode,
-        finalDiscountValue,
-      );
-
-      if (draftOrderId != null) {
-        final responseBody = await _completeDraftOrder(draftOrderId, _isCodSelected);
-        final responseData = json.decode(responseBody);
-
-        final shopifyOrderId = responseData['draft_order']?['order_id']?.toString() ??
-            responseData['order']?['id']?.toString() ??
-            draftOrderId;
-
-        if (isLoggedIn) {
-          // Process in Laravel (send the final combined discount for tracking)
-          await _processOrderInLaravel(
-            shopifyOrderId,
-            widget.originalAmount,
-            userId!,
-            redeemedPoints, // Points redeemed from loyalty (0 if none)
-            finalDiscountValue, // Total combined monetary discount applied
-            finalDiscountCode, // Combined code string
-          );
-        }
+      final draftId = await _createDraftOrder(_customDiscountCode, _couponDiscountValue);
+      if (draftId != null) {
+        final response = await _completeDraftOrder(draftId);
+        final data = json.decode(response);
+        final orderId = data['draft_order']?['order_id']?.toString() ?? draftId;
 
         CartService.clearCart();
-        Fluttertoast.showToast(
-          msg: "Order placed successfully!",
-          backgroundColor: Colors.green,
-        );
-
-        if (mounted) {
-          Navigator.pushAndRemoveUntil(
-            context,
-            MaterialPageRoute(
-              builder: (_) => ThankYouScreen(orderNumber: shopifyOrderId),
-            ),
-                (_) => false,
-          );
-        }
+        Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => ThankYouScreen(orderNumber: orderId)), (r) => false);
+      } else {
+        Fluttertoast.showToast(msg: "Failed to create order. Please try again.");
       }
     } catch (e) {
-      Fluttertoast.showToast(msg: "Error: ${e.toString()}", backgroundColor: Colors.red);
+      Fluttertoast.showToast(msg: "Checkout Error: $e");
     } finally {
       setState(() => _isLoading = false);
     }
   }
 
-  Future<void> _processOrderInLaravel(
-      String shopifyOrderId,
-      double originalAmount,
-      String userId,
-      int? redeemedPoints,
-      double? discountApplied,
-      String? discountCode,
-      ) async {
-    final prefs = await SharedPreferences.getInstance();
-    final String? token = prefs.getString('laravelToken');
-
-    if (token == null) {
-      if (kDebugMode) {
-        print("Laravel token not found in SharedPreferences");
-      }
-      return;
-    }
-
-    final payload = {
-      'user_id': userId,
-      'shopify_order_id': shopifyOrderId,
-      'total_amount': originalAmount.toStringAsFixed(2),
-      'status': 'paid',
-      'points_redeemed': redeemedPoints ?? 0,
-      'discount_applied': discountApplied ?? 0,
-      'discount_code': discountCode ?? widget.discountCode,
-    };
-
-    final uri = Uri.parse('$localurl/api/orders/process');
-
-    try {
-      final response = await http.post(
-        uri,
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: json.encode(payload),
-      );
-
-      if (kDebugMode && response.statusCode != 201) {
-        print("Laravel API Error: ${response.statusCode} - ${response.body}");
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        print("Error processing Laravel order: $e");
-      }
-    }
-  }
-
-  // UPDATED: Use combined discountValue and discountCode
-  Future<String?> _createDraftOrder(String? discountCode, double? discountValue) async {
-    final lineItems = widget.cartItems.map((product) {
-      return {
-        "variant_id": _extractVariantId(product.variantId),
-        "quantity": product.quantity,
-        "price": product.price,
-        "title": product.title,
-      };
-    }).toList();
-
-    List<String> orderTagsList = ["mobile-app"];
-    if (_isCodSelected) {
-      orderTagsList.add("COD");
-    }
-    final String orderTags = orderTagsList.join(', ');
-
-    const String defaultCity = "Lahore";
-    const String defaultCountry = "Pakistan";
-    const String defaultZip = "54000";
-
-    final String userNote = _noteController.text.trim();
-    final String finalNote = userNote;
-
-    Map<String, dynamic> payload = {
-      "draft_order": {
-        "line_items": lineItems,
-        "email": _emailController.text,
-        "shipping_address": {
-          "first_name": _nameController.text.split(' ').first,
-          "last_name": _nameController.text.split(' ').length > 1
-              ? _nameController.text.split(' ').last
-              : '',
-          "address1": _addressController.text,
-          "city": defaultCity,
-          "country": defaultCountry,
-          "zip": defaultZip,
-          "phone": _phoneController.text
-        },
-        "billing_address": {
-          "first_name": _nameController.text.split(' ').first,
-          "last_name": _nameController.text.split(' ').length > 1
-              ? _nameController.text.split(' ').last
-              : '',
-          "address1": _addressController.text,
-          "city": defaultCity,
-          "country": defaultCountry,
-          "zip": defaultZip,
-          "phone": _phoneController.text
-        },
-        "note": finalNote,
-        "tags": orderTags,
-      }
-    };
-
-    // Apply the combined discount as a single fixed amount discount
-    if (discountCode != null && discountValue != null && discountValue > 0) {
-      payload["draft_order"]["applied_discount"] = {
-        "description": "Combined Discount",
-        "value": discountValue.toStringAsFixed(2),
-        "value_type": "fixed_amount",
-        "amount": discountValue.toStringAsFixed(2),
-        "title": discountCode, // This holds the combined description (COUPON+LOYALTY)
-      };
-    }
-    else if (widget.discountCode != null && widget.discountCode!.isNotEmpty) {
-      payload["draft_order"]["applied_discount"] = {
-        "title": widget.discountCode,
-      };
-    }
-
-    final uri = Uri.parse(
-        'https://$shopifyStoreUrl_const/admin/api/$adminApiVersion_const/draft_orders.json');
-
-    final response = await http.post(
-      uri,
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Shopify-Access-Token': adminAccessToken_const,
-      },
-      body: json.encode(payload),
-    );
-
-    if (response.statusCode == 201) {
-      final jsonResponse = json.decode(response.body);
-      return jsonResponse['draft_order']['id'].toString();
-    } else {
-      throw Exception(
-          'Failed to create draft order: ${response.statusCode} - ${response.body}');
-    }
-  }
-
-  Future<String> _completeDraftOrder(String draftOrderId, bool isCod) async {
-    final Map<String, dynamic> body = {
-      "draft_order": {
-        "id": draftOrderId,
-        // "payment_pending": isCod,
-      }
-    };
-
-    // final uri = Uri.parse(
-    //     'https://$shopifyStoreUrl_const/admin/api/$adminApiVersion_const/draft_orders/$draftOrderId/complete.json');
-    final uri = Uri.parse(
-        'https://$shopifyStoreUrl_const/admin/api/$adminApiVersion_const/draft_orders/$draftOrderId/complete.json?payment_pending=true');
+  Future<String> _completeDraftOrder(String id) async {
     final response = await http.put(
-      uri,
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Shopify-Access-Token': adminAccessToken_const,
-      },
-      body: json.encode(body),
+      Uri.parse('https://$shopifyStoreUrl_const/admin/api/$adminApiVersion_const/draft_orders/$id/complete.json?payment_pending=true'),
+      headers: {'Content-Type': 'application/json', 'X-Shopify-Access-Token': adminAccessToken_const},
     );
-
-    if (response.statusCode == 200) {
-      return response.body;
-    } else {
-      throw Exception(
-          'Failed to complete draft order: ${response.statusCode} - ${response.body}');
-    }
-  }
-
-  String _extractVariantId(String variantGid) {
-    final parts = variantGid.split('/');
-    return parts.last;
+    if (response.statusCode == 200) return response.body;
+    throw Exception("Completion failed");
   }
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-//
-//
-//
-//
-//
-//
 // import 'package:flutter/material.dart';
 // import 'package:fluttertoast/fluttertoast.dart';
 // import 'package:achhafoods/screens/Consts/CustomColorTheme.dart';
 // import 'package:achhafoods/screens/Consts/appBar.dart';
-// import 'package:achhafoods/screens/Consts/conts.dart'; // Make sure this provides `apiVersion` and `localurl`
+// import 'package:achhafoods/screens/Consts/conts.dart';
 // import 'package:achhafoods/screens/Drawer/Drawer.dart';
 // import 'package:achhafoods/screens/Navigation%20Bar/NavigationBar.dart';
 // import 'package:http/http.dart' as http;
@@ -1113,7 +539,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 // import 'package:achhafoods/screens/CartScreen/ThankYouScreen.dart';
 // import 'package:shared_preferences/shared_preferences.dart';
 // import '../../services/CartServices.dart';
-//
+// import '../Consts/shopify_auth_service.dart';
 //
 // class CheckoutScreen extends StatefulWidget {
 //   final List cartItems;
@@ -1122,12 +548,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 //   final String? discountCode;
 //
 //   const CheckoutScreen({
-//     Key? key,
+//     super.key,
 //     required this.cartItems,
 //     required this.finalAmount,
 //     required this.originalAmount,
 //     this.discountCode,
-//   }) : super(key: key);
+//   });
 //
 //   @override
 //   State<CheckoutScreen> createState() => _CheckoutScreenState();
@@ -1140,25 +566,639 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 //   final TextEditingController _phoneController = TextEditingController();
 //   final TextEditingController _nameController = TextEditingController();
 //   final TextEditingController _discountCodeController = TextEditingController();
-//   // --- ADDED ---: Controller for the optional order note.
 //   final TextEditingController _noteController = TextEditingController();
 //
+//   final TextEditingController _couponCodeController = TextEditingController();
+//   String? _customDiscountCode;
+//   double _couponDiscountValue = 0.0;
+//
 //   Map<String, dynamic>? customer;
-//   Map<String, dynamic>? laravelUser;
-//   bool _isCodSelected = true;
 //   bool _isLoading = false;
-//   bool _useLoyaltyPoints = false;
+//   bool _isLoggedIn = false;
+//
+//   late double _finalAmount;
+//   bool _discountApplied = false;
+//
+//   final List<Map<String, String>> _savedAddresses = [];
+//   String? _selectedAddressKey;
+//
+//   @override
+//   void initState() {
+//     super.initState();
+//     _checkLoginStatusAndLoadInfo();
+//
+//     // Initialize amounts
+//     _finalAmount = widget.finalAmount;
+//     if (widget.discountCode != null && widget.discountCode!.isNotEmpty) {
+//       _discountCodeController.text = widget.discountCode!;
+//       _discountApplied = true;
+//       // Calculate initial discount value from passed props
+//       _couponDiscountValue = widget.originalAmount - widget.finalAmount;
+//       _customDiscountCode = widget.discountCode;
+//     }
+//   }
+//
+//   @override
+//   void dispose() {
+//     _emailController.dispose();
+//     _addressController.dispose();
+//     _phoneController.dispose();
+//     _nameController.dispose();
+//     _discountCodeController.dispose();
+//     _noteController.dispose();
+//     _couponCodeController.dispose();
+//     super.dispose();
+//   }
+//
+//   Future<void> _checkLoginStatusAndLoadInfo() async {
+//     final prefs = await SharedPreferences.getInstance();
+//     final customerJson = prefs.getString('shopifyCustomer') ?? prefs.getString('customer');
+//
+//     if (customerJson != null) {
+//       setState(() => _isLoggedIn = true);
+//       _loadCustomerInfoFromLocal(customerJson);
+//     } else {
+//       setState(() {
+//         _isLoggedIn = false;
+//         _selectedAddressKey = 'new_address_option';
+//       });
+//     }
+//   }
+//
+//   void _loadCustomerInfoFromLocal(String jsonString) {
+//     try {
+//       final data = json.decode(jsonString);
+//       final cust = data['customer'];
+//
+//       if (cust != null) {
+//         _emailController.text = cust['email'] ?? '';
+//         _nameController.text = '${cust['firstName'] ?? ''} ${cust['lastName'] ?? ''}'.trim();
+//         _phoneController.text = cust['phone'] ?? '';
+//
+//         List<dynamic> addresses = [];
+//         if (cust['addresses'] != null) {
+//           addresses = (cust['addresses'] is List) ? cust['addresses'] : (cust['addresses']['nodes'] ?? []);
+//         }
+//
+//         _savedAddresses.clear();
+//         for (var addr in addresses) {
+//           List<String> parts = [];
+//           if (addr['address1'] != null) parts.add(addr['address1']);
+//           if (addr['city'] != null) parts.add(addr['city']);
+//           if (addr['zip'] != null) parts.add(addr['zip']);
+//           if (addr['country'] != null) parts.add(addr['country']);
+//
+//           String fullStr = parts.join(', ');
+//           if (fullStr.isNotEmpty) {
+//             _savedAddresses.add({'label': addr['id']?.toString() ?? addr['address1'], 'address': fullStr});
+//           }
+//         }
+//
+//         setState(() {
+//           if (_savedAddresses.isNotEmpty) {
+//             _selectedAddressKey = _savedAddresses.first['label'];
+//             _addressController.text = _savedAddresses.first['address']!;
+//           } else {
+//             _selectedAddressKey = 'new_address_option';
+//           }
+//         });
+//       }
+//     } catch (e) {
+//       if (kDebugMode) print("Error parsing customer data: $e");
+//     }
+//   }
+//
+//   Future<void> _checkCouponValidity() async {
+//     final couponCode = _couponCodeController.text.trim();
+//     if (couponCode.isEmpty) {
+//       Fluttertoast.showToast(msg: "Please enter a coupon code.");
+//       return;
+//     }
+//
+//     setState(() => _isLoading = true);
+//
+//     try {
+//       if (kDebugMode) print('🔍 Validating Coupon: $couponCode');
+//
+//       final validationResult = await ShopifyAuthService.validateShopifyDiscountCode(couponCode);
+//
+//       if (kDebugMode) print('📦 Validation Result: $validationResult');
+//
+//       if (validationResult['valid'] == true) {
+//         // Ensure we handle the value safely as a double
+//         final double value = (validationResult['value'] as num).toDouble();
+//         final String type = validationResult['value_type'] as String;
+//
+//         double calculatedDiscount;
+//         if (type == 'percentage') {
+//           calculatedDiscount = widget.originalAmount * (value / 100);
+//           if (kDebugMode) print('🔢 Perc Discount: $value% of ${widget.originalAmount} = $calculatedDiscount');
+//         } else {
+//           calculatedDiscount = value;
+//           if (kDebugMode) print('🔢 Fixed Discount: $calculatedDiscount');
+//         }
+//
+//         setState(() {
+//           _customDiscountCode = couponCode;
+//           _couponDiscountValue = calculatedDiscount;
+//           _discountCodeController.text = couponCode;
+//           _recalculateFinalAmount(); // This updates _finalAmount and _discountApplied
+//         });
+//
+//         Fluttertoast.showToast(msg: "Coupon Applied!", backgroundColor: Colors.green);
+//       } else {
+//         if (kDebugMode) print('❌ Coupon Invalid: ${validationResult['message']}');
+//         Fluttertoast.showToast(msg: validationResult['message'] ?? "Invalid code", backgroundColor: Colors.red);
+//       }
+//     } catch (e) {
+//       if (kDebugMode) print('🔥 Coupon Exception: $e');
+//       Fluttertoast.showToast(msg: "Error validating coupon");
+//     } finally {
+//       setState(() => _isLoading = false);
+//     }
+//   }
+//
+//   void _recalculateFinalAmount() {
+//     setState(() {
+//       // 1. Calculate how much to take off
+//       double discountToApply = _couponDiscountValue.clamp(0.0, widget.originalAmount);
+//
+//       // 2. Update the final amount state
+//       _finalAmount = widget.originalAmount - discountToApply;
+//
+//       // 3. Mark as applied if discount is greater than 0
+//       _discountApplied = discountToApply > 0;
+//
+//       if (kDebugMode) {
+//         print('♻️ Recalculated: Original: ${widget.originalAmount}, Discount: $discountToApply, Final: $_finalAmount');
+//       }
+//     });
+//   }
+//
+//   Future<String?> _createDraftOrder(String? code, double discount) async {
+//     if (kDebugMode) print('📝 Creating Draft Order with Code: $code, Discount: $discount');
+//
+//     final lineItems = widget.cartItems.map((p) => {
+//       "variant_id": p.variantId.split('/').last,
+//       "quantity": p.quantity,
+//     }).toList();
+//
+//     Map<String, dynamic> payload = {
+//       "draft_order": {
+//         "line_items": lineItems,
+//         "email": _emailController.text,
+//         "shipping_address": {
+//           "first_name": _nameController.text,
+//           "address1": _addressController.text,
+//           "city": "Lahore",
+//           "country": "Pakistan",
+//           "phone": _phoneController.text
+//         },
+//         "use_customer_default_address": false,
+//         "tags": "mobile-app, COD",
+//       }
+//     };
+//
+//     // CRITICAL: This sends the discount to Shopify Admin
+//     if (code != null && discount > 0) {
+//       payload["draft_order"]["applied_discount"] = {
+//         "description": "Coupon: $code",
+//         "value": discount.toStringAsFixed(2),
+//         "value_type": "fixed_amount",
+//         "title": code
+//       };
+//     }
+//
+//     final response = await http.post(
+//       Uri.parse('https://$shopifyStoreUrl_const/admin/api/$adminApiVersion_const/draft_orders.json'),
+//       headers: {
+//         'Content-Type': 'application/json',
+//         'X-Shopify-Access-Token': adminAccessToken_const
+//       },
+//       body: json.encode(payload),
+//     );
+//
+//     if (kDebugMode) print('📥 Draft Order Response Status: ${response.statusCode}');
+//
+//     if (response.statusCode == 201) {
+//       return json.decode(response.body)['draft_order']['id'].toString();
+//     } else {
+//       if (kDebugMode) print('📥 Draft Order Error: ${response.body}');
+//       return null;
+//     }
+//   }
+//
+//   void _removeCoupon() {
+//     setState(() {
+//       _couponCodeController.clear();
+//       _customDiscountCode = null;
+//       _couponDiscountValue = 0.0;
+//       _discountCodeController.clear();
+//       _recalculateFinalAmount();
+//     });
+//     Fluttertoast.showToast(msg: "Coupon removed");
+//   }
+//
+//   @override
+//   Widget build(BuildContext context) {
+//     double displayDiscountValue = widget.originalAmount - _finalAmount;
+//
+//     return Stack(
+//       children: [
+//         Scaffold(
+//           appBar: const CustomAppBar(),
+//           drawer: const CustomDrawer(),
+//           bottomNavigationBar: const NewNavigationBar(),
+//           body: Column(
+//             children: [
+//               Container(
+//                 width: double.infinity,
+//                 color: CustomColorTheme.CustomPrimaryAppColor,
+//                 padding: const EdgeInsets.symmetric(vertical: 14),
+//                 alignment: Alignment.center,
+//                 child: const Text("Checkout", style: TextStyle(fontSize: 20, color: Colors.white, fontWeight: FontWeight.bold)),
+//               ),
+//               Expanded(
+//                 child: SingleChildScrollView(
+//                   padding: const EdgeInsets.all(16),
+//                   child: Form(
+//                     key: _formKey,
+//                     child: Column(
+//                       crossAxisAlignment: CrossAxisAlignment.start,
+//                       children: [
+//                         const Text("Order Summary:", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+//                         const SizedBox(height: 8),
+//                         ...widget.cartItems.map((product) => Padding(
+//                           padding: const EdgeInsets.symmetric(vertical: 2),
+//                           child: Row(
+//                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+//                             children: [
+//                               Flexible(child: Text("${product.title} (x${product.quantity})")),
+//                               Text("Rs. ${(product.price * product.quantity).toStringAsFixed(2)}"),
+//                             ],
+//                           ),
+//                         )),
+//                         if (_discountApplied)
+//                           Padding(
+//                             padding: const EdgeInsets.only(top: 8.0),
+//                             child: Row(
+//                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
+//                               children: [
+//                                 Text("Discount (${_discountCodeController.text}):", style: TextStyle(color: Colors.green.shade700, fontWeight: FontWeight.bold)),
+//                                 Text("- Rs. ${displayDiscountValue.toStringAsFixed(2)}", style: TextStyle(color: Colors.green.shade700, fontWeight: FontWeight.bold)),
+//                               ],
+//                             ),
+//                           ),
+//                         const Divider(),
+//                         Row(
+//                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
+//                           children: [
+//                             const Text("Grand Total:", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+//                             Text("Rs. ${_finalAmount.toStringAsFixed(2)}", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+//                           ],
+//                         ),
+//                         const SizedBox(height: 20),
+//
+//                         // COUPON SECTION
+//                         Container(
+//                           padding: const EdgeInsets.all(12),
+//                           decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
+//                           child: Column(
+//                             crossAxisAlignment: CrossAxisAlignment.start,
+//                             children: [
+//                               const Text("Apply Coupon", style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+//                               const SizedBox(height: 8),
+//                               Row(
+//                                 children: [
+//                                   Expanded(
+//                                     child: TextFormField(
+//                                       controller: _couponCodeController,
+//                                       decoration: const InputDecoration(hintText: "Enter code", border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 10)),
+//                                       enabled: _customDiscountCode == null,
+//                                     ),
+//                                   ),
+//                                   const SizedBox(width: 8),
+//                                   ElevatedButton(
+//                                     onPressed: _isLoading ? null : (_customDiscountCode != null ? _removeCoupon : _checkCouponValidity),
+//                                     style: ElevatedButton.styleFrom(backgroundColor: _customDiscountCode != null ? Colors.red : Colors.black),
+//                                     child: Text(_customDiscountCode != null ? "Remove" : "Apply", style: const TextStyle(color: Colors.white)),
+//                                   ),
+//                                 ],
+//                               ),
+//                             ],
+//                           ),
+//                         ),
+//                         const SizedBox(height: 20),
+//
+//                         TextFormField(
+//                           controller: _nameController,
+//                           decoration: const InputDecoration(labelText: "Full Name", border: OutlineInputBorder()),
+//                           validator: (v) => v!.isEmpty ? "Required" : null,
+//                         ),
+//                         const SizedBox(height: 12),
+//                         TextFormField(
+//                           controller: _emailController,
+//                           decoration: const InputDecoration(labelText: "Email", border: OutlineInputBorder()),
+//                           validator: (v) => (v == null || !v.contains('@')) ? "Invalid email" : null,
+//                         ),
+//                         const SizedBox(height: 12),
+//                         TextFormField(
+//                           controller: _phoneController,
+//                           decoration: const InputDecoration(labelText: "Phone", border: OutlineInputBorder()),
+//                           validator: (v) => v!.isEmpty ? "Required" : null,
+//                         ),
+//                         const SizedBox(height: 12),
+//
+//                         if (_isLoggedIn && _savedAddresses.isNotEmpty)
+//                           DropdownButtonFormField<String>(
+//                             value: _selectedAddressKey,
+//                             decoration: const InputDecoration(labelText: "Shipping Address", border: OutlineInputBorder()),
+//                             items: [
+//                               ..._savedAddresses.map((addr) => DropdownMenuItem(value: addr['label'], child: Text(addr['address']!, overflow: TextOverflow.ellipsis))),
+//                               const DropdownMenuItem(value: 'new_address_option', child: Text("Add New Address")),
+//                             ],
+//                             onChanged: (val) {
+//                               setState(() {
+//                                 _selectedAddressKey = val;
+//                                 if (val != 'new_address_option') {
+//                                   _addressController.text = _savedAddresses.firstWhere((e) => e['label'] == val)['address']!;
+//                                 } else {
+//                                   _addressController.clear();
+//                                 }
+//                               });
+//                             },
+//                           ),
+//                         const SizedBox(height: 12),
+//                         TextFormField(
+//                           controller: _addressController,
+//                           decoration: const InputDecoration(labelText: "Full Address Details", border: OutlineInputBorder()),
+//                           maxLines: 2,
+//                           enabled: _selectedAddressKey == 'new_address_option' || !_isLoggedIn,
+//                           validator: (v) => v!.isEmpty ? "Required" : null,
+//                         ),
+//                         const SizedBox(height: 20),
+//
+//                         SizedBox(
+//                           width: double.infinity,
+//                           child: ElevatedButton(
+//                             onPressed: _isLoading ? null : () {
+//                               if (_formKey.currentState!.validate()) _placeOrderDirectly();
+//                             },
+//                             style: ElevatedButton.styleFrom(backgroundColor: Colors.red, padding: const EdgeInsets.symmetric(vertical: 16)),
+//                             child: const Text("Place Order", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+//                           ),
+//                         )
+//                       ],
+//                     ),
+//                   ),
+//                 ),
+//               ),
+//             ],
+//           ),
+//         ),
+//         if (_isLoading) const Center(child: CircularProgressIndicator()),
+//       ],
+//     );
+//   }
+//
+//   Future<void> _placeOrderDirectly() async {
+//     setState(() => _isLoading = true);
+//     try {
+//       final draftId = await _createDraftOrder(_customDiscountCode, _couponDiscountValue);
+//       if (draftId != null) {
+//         final response = await _completeDraftOrder(draftId);
+//         final data = json.decode(response);
+//         final orderId = data['draft_order']?['order_id']?.toString() ?? draftId;
+//
+//         CartService.clearCart();
+//         Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => ThankYouScreen(orderNumber: orderId)), (r) => false);
+//       }
+//     } catch (e) {
+//       Fluttertoast.showToast(msg: "Checkout Error: $e");
+//     } finally {
+//       setState(() => _isLoading = false);
+//     }
+//   }
+//
+//   Future<String> _completeDraftOrder(String id) async {
+//     final response = await http.put(
+//       Uri.parse('https://$shopifyStoreUrl_const/admin/api/$adminApiVersion_const/draft_orders/$id/complete.json?payment_pending=true'),
+//       headers: {'Content-Type': 'application/json', 'X-Shopify-Access-Token': adminAccessToken_const},
+//     );
+//     if (response.statusCode == 200) return response.body;
+//     throw Exception("Completion failed");
+//   }
+// }
+//
+
+
+
+// --- IMPROVED COUPON LOGIC ---
+// Future<void> _checkCouponValidity() async {
+//   final couponCode = _couponCodeController.text.trim();
+//   if (couponCode.isEmpty) {
+//     Fluttertoast.showToast(msg: "Please enter a coupon code.");
+//     return;
+//   }
+//
+//   setState(() => _isLoading = true);
+//
+//   try {
+//     final validationResult = await ShopifyAuthService.validateShopifyDiscountCode(couponCode);
+//
+//     if (validationResult['valid'] == true) {
+//       final double value = (validationResult['value'] as num).toDouble();
+//       final String type = validationResult['value_type'] as String;
+//
+//       double calculatedDiscount;
+//       if (type == 'percentage') {
+//         calculatedDiscount = widget.originalAmount * (value / 100);
+//       } else {
+//         calculatedDiscount = value;
+//       }
+//
+//       setState(() {
+//         _customDiscountCode = couponCode;
+//         _couponDiscountValue = calculatedDiscount;
+//         _discountCodeController.text = couponCode;
+//         _recalculateFinalAmount();
+//       });
+//
+//       Fluttertoast.showToast(msg: "Coupon Applied!", backgroundColor: Colors.green);
+//     } else {
+//       Fluttertoast.showToast(msg: validationResult['message'] ?? "Invalid code", backgroundColor: Colors.red);
+//     }
+//   } catch (e) {
+//     Fluttertoast.showToast(msg: "Error validating coupon");
+//   } finally {
+//     setState(() => _isLoading = false);
+//   }
+// }
+
+// --- Core Coupon Logic inside CheckoutScreen ---
+
+// --- IMPROVED COUPON LOGIC WITH PRINTS ---
+// --- Draft Order Creation Logic ---
+//
+//   Future<String?> _createDraftOrder(String? code, double discount) async {
+//     final lineItems = widget.cartItems.map((p) => {
+//       "variant_id": p.variantId.split('/').last, // Extract numeric ID from GID
+//       "quantity": p.quantity,
+//     }).toList();
+//
+//     Map<String, dynamic> payload = {
+//       "draft_order": {
+//         "line_items": lineItems,
+//         "email": _emailController.text,
+//         "shipping_address": {
+//           "first_name": _nameController.text,
+//           "address1": _addressController.text,
+//           "city": "Lahore",
+//           "country": "Pakistan",
+//           "phone": _phoneController.text
+//         },
+//         "use_customer_default_address": false,
+//         "tags": "mobile-app, COD",
+//       }
+//     };
+//
+//     // This is the CRITICAL part for Shopify to show the discount on the order
+//     if (code != null && discount > 0) {
+//       payload["draft_order"]["applied_discount"] = {
+//         "description": "Coupon: $code",
+//         "value": discount.toStringAsFixed(2),
+//         "value_type": "fixed_amount", // We send the calculated PKR value
+//         "title": code
+//       };
+//     }
+//
+//     final response = await http.post(
+//       Uri.parse('https://$shopifyStoreUrl_const/admin/api/$adminApiVersion_const/draft_orders.json'),
+//       headers: {
+//         'Content-Type': 'application/json',
+//         'X-Shopify-Access-Token': adminAccessToken_const
+//       },
+//       body: json.encode(payload),
+//     );
+//
+//     if (response.statusCode == 201) {
+//       return json.decode(response.body)['draft_order']['id'].toString();
+//     }
+//     return null;
+//   }
+
+
+// void _recalculateFinalAmount() {
+//   setState(() {
+//     double discountToApply = _couponDiscountValue.clamp(0.0, widget.originalAmount);
+//     _finalAmount = widget.originalAmount - discountToApply;
+//     _discountApplied = discountToApply > 0;
+//   });
+// }
+
+  // Future<String?> _createDraftOrder(String? code, double discount) async {
+  //   final lineItems = widget.cartItems.map((p) => {
+  //     "variant_id": p.variantId.split('/').last,
+  //     "quantity": p.quantity,
+  //   }).toList();
+  //
+  //   Map<String, dynamic> payload = {
+  //     "draft_order": {
+  //       "line_items": lineItems,
+  //       "email": _emailController.text,
+  //       "shipping_address": {
+  //         "first_name": _nameController.text,
+  //         "address1": _addressController.text,
+  //         "city": "Lahore",
+  //         "country": "Pakistan",
+  //         "phone": _phoneController.text
+  //       },
+  //       "use_customer_default_address": false,
+  //       "tags": "mobile-app, COD",
+  //     }
+  //   };
+  //
+  //   // Apply discount to the draft order correctly
+  //   if (code != null && discount > 0) {
+  //     payload["draft_order"]["applied_discount"] = {
+  //       "description": "Coupon: $code",
+  //       "value": discount.toStringAsFixed(2),
+  //       "value_type": "fixed_amount",
+  //       "title": code
+  //     };
+  //   }
+  //
+  //   final response = await http.post(
+  //     Uri.parse('https://$shopifyStoreUrl_const/admin/api/$adminApiVersion_const/draft_orders.json'),
+  //     headers: {'Content-Type': 'application/json', 'X-Shopify-Access-Token': adminAccessToken_const},
+  //     body: json.encode(payload),
+  //   );
+  //
+  //   if (response.statusCode == 201) return json.decode(response.body)['draft_order']['id'].toString();
+  //   return null;
+  // }
+
+
+// import 'package:flutter/material.dart';
+// import 'package:fluttertoast/fluttertoast.dart';
+// import 'package:achhafoods/screens/Consts/CustomColorTheme.dart';
+// import 'package:achhafoods/screens/Consts/appBar.dart';
+// import 'package:achhafoods/screens/Consts/conts.dart';
+// import 'package:achhafoods/screens/Drawer/Drawer.dart';
+// import 'package:achhafoods/screens/Navigation%20Bar/NavigationBar.dart';
+// import 'package:http/http.dart' as http;
+// import 'dart:convert';
+// import 'package:flutter/foundation.dart';
+// import 'package:achhafoods/screens/CartScreen/ThankYouScreen.dart';
+// import 'package:shared_preferences/shared_preferences.dart';
+// import '../../services/CartServices.dart';
+// import '../Consts/shopify_auth_service.dart';
+//
+// class CheckoutScreen extends StatefulWidget {
+//   final List cartItems;
+//   final double originalAmount;
+//   final double finalAmount;
+//   final String? discountCode;
+//
+//   const CheckoutScreen({
+//     super.key,
+//     required this.cartItems,
+//     required this.finalAmount,
+//     required this.originalAmount,
+//     this.discountCode,
+//   });
+//
+//   @override
+//   State<CheckoutScreen> createState() => _CheckoutScreenState();
+// }
+//
+// class _CheckoutScreenState extends State<CheckoutScreen> {
+//   final _formKey = GlobalKey<FormState>();
+//   final TextEditingController _emailController = TextEditingController();
+//   final TextEditingController _addressController = TextEditingController();
+//   final TextEditingController _phoneController = TextEditingController();
+//   final TextEditingController _nameController = TextEditingController();
+//   final TextEditingController _discountCodeController = TextEditingController();
+//   final TextEditingController _noteController = TextEditingController();
+//
+//   // --- COUPON STATE ---
+//   final TextEditingController _couponCodeController = TextEditingController();
+//   String? _customDiscountCode;
+//   double _couponDiscountValue = 0.0;
+//
+//   Map<String, dynamic>? customer;
+//   final bool _isCodSelected = true;
+//   bool _isLoading = false;
+//   bool _useLoyaltyPoints = false; // Kept for UI, logic needs Laravel token which might not exist in pure Shopify mode
 //   int _loyaltyPoints = 0;
 //   bool _isLoggedIn = false;
 //
 //   late double _finalAmount;
-//   bool _hasAppliedDiscount = false;
 //   bool _discountApplied = false;
 //
-//   // STATE VARIABLES FOR ADDRESSES
-//   List<Map<String, String>> _savedAddresses = [];
+//   // Stores addresses in a simple format for the dropdown
+//   final List<Map<String, String>> _savedAddresses = [];
 //   String? _selectedAddressKey;
-//
 //
 //   @override
 //   void initState() {
@@ -1169,11 +1209,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 //     if (widget.discountCode != null && widget.discountCode!.isNotEmpty) {
 //       _discountCodeController.text = widget.discountCode!;
 //       _discountApplied = true;
-//       _hasAppliedDiscount = true;
 //     }
 //   }
 //
-//   // --- ADDED ---: Dispose method to clean up controllers.
 //   @override
 //   void dispose() {
 //     _emailController.dispose();
@@ -1181,147 +1219,178 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 //     _phoneController.dispose();
 //     _nameController.dispose();
 //     _discountCodeController.dispose();
-//     _noteController.dispose(); // Dispose the new controller
+//     _noteController.dispose();
+//     _couponCodeController.dispose();
 //     super.dispose();
 //   }
-//
 //
 //   // --- Core API and Data Loading Logic ---
 //
 //   Future<void> _checkLoginStatusAndLoadInfo() async {
 //     final prefs = await SharedPreferences.getInstance();
-//     final laravelUserJson = prefs.getString('laravelUser');
-//     if (laravelUserJson != null) {
+//     final customerJson = prefs.getString('shopifyCustomer') ?? prefs.getString('customer');
+//
+//     if (customerJson != null) {
 //       setState(() {
 //         _isLoggedIn = true;
 //       });
-//       await _loadCustomerInfo();
+//       _loadCustomerInfoFromLocal(customerJson);
 //     } else {
 //       setState(() {
 //         _isLoggedIn = false;
 //         _selectedAddressKey = 'new_address_option';
 //       });
-//     }
-//   }
-//
-//   Future<Map<String, dynamic>?> _fetchUserDataWithGetAndBody(String email, String? token) async {
-//     final uri = Uri.parse('$localurl/api/user-by-email');
-//     final body = json.encode({"email": email});
-//
-//     final request = http.Request('GET', uri)
-//       ..headers.addAll({
-//         'Content-Type': 'application/json',
-//         'Accept': 'application/json',
-//         if (token != null) 'Authorization': 'Bearer $token',
-//       })
-//       ..body = body;
-//
-//     try {
-//       final streamedResponse = await http.Client().send(request);
-//       final response = await http.Response.fromStream(streamedResponse);
-//
-//       if (response.statusCode == 200) {
-//         final Map<String, dynamic> responseData = json.decode(response.body);
-//         if (kDebugMode) print("API User Data (GET with Body): $responseData");
-//         return responseData;
-//       } else {
-//         if (kDebugMode) {
-//           print("Failed to fetch user data (GET with Body): ${response.statusCode} - ${response.body}");
-//         }
-//         return null;
-//       }
-//     } catch (e) {
-//       if (kDebugMode) print("Error fetching user data (GET with Body): $e");
-//       return null;
 //     }
 //   }
 //
 //   void _populateAddressControllers(String fullAddress) {
-//     // Only set the main address controller
 //     _addressController.text = fullAddress;
 //   }
 //
-//   Future<void> _loadCustomerInfo() async {
-//     final prefs = await SharedPreferences.getInstance();
-//     final customerData = prefs.getString('customer');
-//     final laravelUserData = prefs.getString('laravelUser');
-//     final String? laravelToken = prefs.getString('laravelToken');
+//   // 🟢 LOAD INFO DIRECTLY FROM LOCAL SHOPIFY DATA (No Laravel Address Call)
+//   void _loadCustomerInfoFromLocal(String jsonString) {
+//     try {
+//       final data = json.decode(jsonString);
+//       final cust = data['customer'];
 //
-//     if (customerData != null && laravelUserData != null) {
-//       setState(() {
-//         customer = json.decode(customerData);
-//         laravelUser = json.decode(laravelUserData);
-//         final customerDetails = customer?['customer'] as Map<String, dynamic>?;
-//         if (customerDetails != null) {
-//           _emailController.text = customerDetails['email'] ?? '';
-//           _nameController.text = '${customerDetails['firstName'] ?? ''} ${customerDetails['lastName'] ?? ''}'.trim();
-//           _phoneController.text = laravelUser!['phone'] ?? '';
+//       if (cust != null) {
+//         _emailController.text = cust['email'] ?? '';
+//         _nameController.text = '${cust['firstName'] ?? ''} ${cust['lastName'] ?? ''}'.trim();
+//         _phoneController.text = cust['phone'] ?? '';
+//
+//         // 🟢 EXTRACT ADDRESSES FROM SHOPIFY OBJECT
+//         List<dynamic> addresses = [];
+//         if (cust['addresses'] != null) {
+//           if (cust['addresses'] is List) {
+//             addresses = cust['addresses'];
+//           } else if (cust['addresses']['nodes'] != null) {
+//             addresses = cust['addresses']['nodes'];
+//           }
 //         }
-//       });
 //
-//       if (_emailController.text.isNotEmpty) {
-//         final responseData = await _fetchUserDataWithGetAndBody(_emailController.text, laravelToken);
+//         _savedAddresses.clear();
+//         for (var addr in addresses) {
+//           // Construct a readable address string
+//           List<String> parts = [];
+//           if (addr['address1'] != null) parts.add(addr['address1']);
+//           if (addr['city'] != null) parts.add(addr['city']);
+//           if (addr['zip'] != null) parts.add(addr['zip']);
+//           if (addr['country'] != null) parts.add(addr['country']);
 //
-//         final userData = responseData?['data'] as Map<String, dynamic>?;
+//           String fullStr = parts.join(', ');
 //
-//         if (responseData?['status'] == true && userData != null) {
-//           final Map<String, dynamic>? addressesMap = userData['full_addresses'];
-//           final int loyaltyPoints = userData['loyalty_points'] ?? 0;
-//
-//           setState(() {
-//             _loyaltyPoints = loyaltyPoints;
-//             _savedAddresses.clear();
-//
-//             if (addressesMap != null) {
-//               addressesMap.forEach((label, fullAddress) {
-//                 _savedAddresses.add({
-//                   'label': label,
-//                   'address': fullAddress.toString(),
-//                 });
-//               });
-//             }
-//
-//             if (_savedAddresses.isNotEmpty) {
-//               _selectedAddressKey = _savedAddresses.first['label'];
-//               _populateAddressControllers(_savedAddresses.first['address']!);
-//             } else {
-//               _selectedAddressKey = 'new_address_option';
-//               _addressController.clear();
-//             }
-//
-//             _isLoggedIn = true;
-//             _recalculateFinalAmount();
-//           });
+//           if (fullStr.isNotEmpty) {
+//             _savedAddresses.add({
+//               'label': addr['address1'] ?? 'Saved Address', // Use address1 as label key
+//               'address': fullStr,
+//             });
+//           }
 //         }
+//
+//         setState(() {
+//           if (_savedAddresses.isNotEmpty) {
+//             // Default to first address
+//             _selectedAddressKey = _savedAddresses.first['label'];
+//             _populateAddressControllers(_savedAddresses.first['address']!);
+//           } else {
+//             _selectedAddressKey = 'new_address_option';
+//             _addressController.clear();
+//           }
+//         });
 //       }
-//     } else {
-//       setState(() {
-//         _isLoggedIn = false;
-//         _selectedAddressKey = 'new_address_option';
-//         _addressController.clear();
-//       });
+//     } catch (e) {
+//       if (kDebugMode) print("Error parsing local customer data: $e");
 //     }
+//   }
+//
+//   Future<void> _checkCouponValidity() async {
+//     final couponCode = _couponCodeController.text.trim();
+//     if (couponCode.isEmpty) {
+//       Fluttertoast.showToast(msg: "Please enter a coupon code.");
+//       return;
+//     }
+//
+//     setState(() => _isLoading = true);
+//
+//     try {
+//       final validationResult = await ShopifyAuthService.validateShopifyDiscountCode(couponCode);
+//
+//       if (validationResult['valid'] == true) {
+//         final double value = validationResult['value'] as double;
+//         final String type = validationResult['value_type'] as String;
+//
+//         double discountAmount;
+//         if (type == 'percentage') {
+//           discountAmount = widget.originalAmount * (value / 100);
+//         } else {
+//           discountAmount = value;
+//         }
+//
+//         discountAmount = discountAmount.clamp(0.0, widget.originalAmount);
+//
+//         setState(() {
+//           _couponDiscountValue = discountAmount;
+//           _customDiscountCode = couponCode;
+//           _recalculateFinalAmount();
+//         });
+//
+//         Fluttertoast.showToast(
+//           msg: "Coupon applied! Discount: Rs. ${discountAmount.toStringAsFixed(2)}",
+//           backgroundColor: Colors.green,
+//         );
+//       } else {
+//         setState(() {
+//           _couponDiscountValue = 0.0;
+//           _customDiscountCode = null;
+//           _recalculateFinalAmount();
+//         });
+//         Fluttertoast.showToast(msg: validationResult['message'] ?? "Invalid code", backgroundColor: Colors.red);
+//       }
+//     } catch (e) {
+//       Fluttertoast.showToast(msg: "Error validation.");
+//     } finally {
+//       setState(() => _isLoading = false);
+//     }
+//   }
+//
+//   void _removeCoupon() {
+//     setState(() {
+//       _couponCodeController.clear();
+//       _couponDiscountValue = 0.0;
+//       _customDiscountCode = null;
+//       _recalculateFinalAmount();
+//     });
+//     Fluttertoast.showToast(msg: "Coupon removed");
 //   }
 //
 //   void _recalculateFinalAmount() {
-//     if (_useLoyaltyPoints) {
-//       double loyaltyDiscount = _loyaltyPoints.toDouble();
-//       _finalAmount = (widget.originalAmount - loyaltyDiscount).clamp(0.0, widget.originalAmount);
-//       _discountApplied = true;
-//       _hasAppliedDiscount = true;
-//       _discountCodeController.text = "Loyalty Points";
-//     } else {
-//       _finalAmount = widget.finalAmount;
-//       _discountApplied = (widget.discountCode != null && widget.discountCode!.isNotEmpty);
-//       _hasAppliedDiscount = (widget.discountCode != null && widget.discountCode!.isNotEmpty);
-//       _discountCodeController.text = widget.discountCode ?? '';
-//     }
-//   }
+//     double couponDiscount = _customDiscountCode != null ? _couponDiscountValue : 0.0;
 //
-//   // --- Build Method and UI Components ---
+//     // Loyalty logic skipped for now as we removed Laravel fetch,
+//     // but structure is here if you re-enable it via Shopify Metafields later.
+//     double totalDiscount = couponDiscount;
+//     totalDiscount = totalDiscount.clamp(0.0, widget.originalAmount);
+//
+//     _finalAmount = (widget.originalAmount - totalDiscount);
+//
+//     setState(() {
+//       _discountApplied = totalDiscount > 0;
+//       if (_customDiscountCode != null) {
+//         _discountCodeController.text = _customDiscountCode!;
+//       } else if (widget.discountCode != null && widget.discountCode!.isNotEmpty) {
+//         _discountCodeController.text = widget.discountCode!;
+//         _finalAmount = widget.finalAmount; // Revert to passed-in discount
+//       } else {
+//         _discountCodeController.clear();
+//         _finalAmount = widget.originalAmount;
+//       }
+//     });
+//   }
 //
 //   @override
 //   Widget build(BuildContext context) {
+//     double totalAppliedDiscountValue = widget.originalAmount - _finalAmount;
+//
 //     return Stack(
 //       children: [
 //         Scaffold(
@@ -1333,18 +1402,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 //             children: [
 //               Container(
 //                 width: double.infinity,
-//                 color: CustomColorTheme.CustomBlueColor,
+//                 color: CustomColorTheme.CustomPrimaryAppColor,
 //                 padding: const EdgeInsets.symmetric(vertical: 14),
 //                 alignment: Alignment.center,
-//                 child: const Text(
-//                   "Checkout",
-//                   style: TextStyle(
-//                     fontSize: 20,
-//                     color: Colors.white,
-//                     fontWeight: FontWeight.bold,
-//                     letterSpacing: 0.5,
-//                   ),
-//                 ),
+//                 child: const Text("Checkout", style: TextStyle(fontSize: 20, color: Colors.white, fontWeight: FontWeight.bold)),
 //               ),
 //               Expanded(
 //                 child: SingleChildScrollView(
@@ -1354,42 +1415,32 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 //                     child: Column(
 //                       crossAxisAlignment: CrossAxisAlignment.start,
 //                       children: [
+//                         // Summary
 //                         const SizedBox(height: 12),
-//                         const Text(
-//                           "Order Summary:",
-//                           style: TextStyle(
-//                               fontSize: 16, fontWeight: FontWeight.bold),
-//                         ),
+//                         const Text("Order Summary:", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
 //                         const SizedBox(height: 8),
 //                         ...widget.cartItems.map((product) => Row(
 //                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
 //                           children: [
-//                             Flexible(
-//                               child: Text(
-//                                   "${product.title} (x${product.quantity})"),
-//                             ),
-//                             Text(
-//                               "Rs. ${(product.price * product.quantity).toStringAsFixed(2)}",
-//                             ),
+//                             Flexible(child: Text("${product.title} (x${product.quantity})")),
+//                             Text("Rs. ${(product.price * product.quantity).toStringAsFixed(2)}"),
 //                           ],
 //                         )),
+//
+//                         // Discount Row
 //                         if (_discountApplied && _finalAmount < widget.originalAmount)
 //                           Padding(
 //                             padding: const EdgeInsets.only(top: 8.0),
 //                             child: Row(
 //                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
 //                               children: [
-//                                 Text(
-//                                   "Discount (${_discountCodeController.text}):",
-//                                   style: TextStyle(
-//                                     color: Colors.green.shade600,
-//                                   ),
-//                                 ),
-//                                 Text(
-//                                   "- Rs. ${(widget.originalAmount - _finalAmount).toStringAsFixed(2)}",
-//                                   style: TextStyle(
-//                                     color: Colors.green.shade600,
-//                                   ),
+//                                 Flexible(child: Text("Discount (${_discountCodeController.text}):", style: TextStyle(color: Colors.green.shade600, fontWeight: FontWeight.bold))),
+//                                 Row(
+//                                   children: [
+//                                     Text("- Rs. ${totalAppliedDiscountValue.toStringAsFixed(2)}", style: TextStyle(color: Colors.green.shade600, fontWeight: FontWeight.bold)),
+//                                     if (_customDiscountCode != null)
+//                                       IconButton(icon: const Icon(Icons.close, size: 16), onPressed: _removeCoupon, padding: EdgeInsets.zero, constraints: const BoxConstraints()),
+//                                   ],
 //                                 ),
 //                               ],
 //                             ),
@@ -1398,71 +1449,91 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 //                         Row(
 //                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
 //                           children: [
-//                             const Text(
-//                               "Grand Total:",
-//                               style: TextStyle(
-//                                   fontSize: 18, fontWeight: FontWeight.bold),
-//                             ),
-//                             Text(
-//                               "Rs. ${_finalAmount.toStringAsFixed(2)}",
-//                               style: const TextStyle(
-//                                   fontSize: 18, fontWeight: FontWeight.bold),
-//                             ),
+//                             const Text("Grand Total:", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+//                             Text("Rs. ${_finalAmount.toStringAsFixed(2)}", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
 //                           ],
 //                         ),
 //                         const SizedBox(height: 20),
 //
-//                         // --- Billing/Contact Info Fields ---
+//                         // Coupon
+//                         Container(
+//                           padding: const EdgeInsets.all(12),
+//                           decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
+//                           child: Column(
+//                             crossAxisAlignment: CrossAxisAlignment.start,
+//                             children: [
+//                               const Text("Apply Coupon", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+//                               const SizedBox(height: 8),
+//                               Row(
+//                                 children: [
+//                                   Expanded(
+//                                     child: TextFormField(
+//                                       controller: _couponCodeController,
+//                                       decoration: InputDecoration(
+//                                         labelText: "Enter coupon code",
+//                                         border: const OutlineInputBorder(),
+//                                         enabled: !_isLoading && _customDiscountCode == null,
+//                                       ),
+//                                     ),
+//                                   ),
+//                                   const SizedBox(width: 8),
+//                                   SizedBox(
+//                                     height: 60,
+//                                     child: ElevatedButton(
+//                                       onPressed: _customDiscountCode != null ? _removeCoupon : (_isLoading ? null : _checkCouponValidity),
+//                                       style: ElevatedButton.styleFrom(
+//                                         backgroundColor: _customDiscountCode != null ? Colors.red : Colors.black,
+//                                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+//                                       ),
+//                                       child: Text(_customDiscountCode != null ? 'Remove' : 'Apply', style: const TextStyle(color: Colors.white)),
+//                                     ),
+//                                   ),
+//                                 ],
+//                               ),
+//                             ],
+//                           ),
+//                         ),
+//                         const SizedBox(height: 16),
+//
+//                         // Info Fields
 //                         TextFormField(
 //                           controller: _nameController,
-//                           decoration:
-//                           const InputDecoration(labelText: "Full Name"),
-//                           validator: (value) =>
-//                           value!.isEmpty ? "Name is required" : null,
+//                           decoration: const InputDecoration(labelText: "Full Name"),
+//                           validator: (value) => value!.isEmpty ? "Name is required" : null,
 //                         ),
 //                         const SizedBox(height: 12),
 //                         TextFormField(
 //                           controller: _emailController,
-//                           decoration:
-//                           const InputDecoration(labelText: "Email Address"),
+//                           decoration: const InputDecoration(labelText: "Email Address"),
 //                           keyboardType: TextInputType.emailAddress,
-//                           validator: (value) {
-//                             if (value!.isEmpty) return "Email is required";
-//                             if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$')
-//                                 .hasMatch(value)) {
-//                               return "Enter valid email";
-//                             }
-//                             return null;
-//                           },
+//                           validator: (value) => value!.isEmpty || !value.contains('@') ? "Enter valid email" : null,
 //                         ),
 //                         const SizedBox(height: 12),
 //                         TextFormField(
 //                           controller: _phoneController,
-//                           decoration:
-//                           const InputDecoration(labelText: "Phone Number"),
+//                           decoration: const InputDecoration(labelText: "Phone Number"),
 //                           keyboardType: TextInputType.phone,
-//                           validator: (value) =>
-//                           value!.isEmpty ? "Phone is required" : null,
+//                           validator: (value) => value!.isEmpty ? "Phone is required" : null,
 //                         ),
 //                         const SizedBox(height: 12),
 //
-//                         // --- ADDRESS DROPDOWN ---
-//
+//                         // 🟢 ADDRESS DROPDOWN (From Shopify Data)
 //                         if (_isLoggedIn && _savedAddresses.isNotEmpty)
 //                           Padding(
 //                             padding: const EdgeInsets.only(bottom: 12.0),
 //                             child: DropdownButtonFormField<String>(
 //                               decoration: const InputDecoration(
 //                                 labelText: 'Select Shipping Address',
-//                                 border: OutlineInputBorder(
-//                                   borderSide: BorderSide(color: Colors.black), // Black border
-//                                 ),
+//                                 border: OutlineInputBorder(borderSide: BorderSide(color: Colors.black)),
 //                               ),
 //                               value: _selectedAddressKey,
 //                               items: [
 //                                 ..._savedAddresses.map((addr) => DropdownMenuItem(
 //                                   value: addr['label'],
-//                                   child: Text('${addr['label']!}: ${addr['address']!}', overflow: TextOverflow.ellipsis),
+//                                   child: SizedBox(
+//                                     width: MediaQuery.of(context).size.width * 0.75,
+//                                     child: Text(addr['address']!, overflow: TextOverflow.ellipsis),
+//                                   ),
 //                                 )),
 //                                 const DropdownMenuItem(
 //                                   value: 'new_address_option',
@@ -1480,12 +1551,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 //                                   }
 //                                 });
 //                               },
-//                               validator: (value) =>
-//                               value == null ? "Please select an address" : null,
 //                             ),
 //                           ),
 //
-//                         // Address Field
 //                         TextFormField(
 //                           controller: _addressController,
 //                           decoration: InputDecoration(
@@ -1494,65 +1562,24 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 //                                   : "Selected Address"
 //                           ),
 //                           maxLines: 3,
-//                           validator: (value) =>
-//                           value!.isEmpty ? "Address is required" : null,
+//                           validator: (value) => value!.isEmpty ? "Address is required" : null,
 //                           enabled: _selectedAddressKey == 'new_address_option' || !_isLoggedIn || _savedAddresses.isEmpty,
+//                           keyboardType: TextInputType.streetAddress,
 //                         ),
 //                         const SizedBox(height: 20),
 //
-//                         // --- ADDED ---: Optional note field.
 //                         TextFormField(
 //                           controller: _noteController,
-//                           decoration: const InputDecoration(
-//                             labelText: "Order Note (Optional)",
-//                             hintText: "Note...",
-//                             border: OutlineInputBorder(),
-//                           ),
-//                           maxLines: 1, // Allows for a slightly larger text area
+//                           decoration: const InputDecoration(labelText: "Order Note (Optional)", hintText: "Note...", border: OutlineInputBorder()),
+//                           maxLines: 1,
 //                         ),
 //                         const SizedBox(height: 20),
 //
-//                         // --- Toggle Buttons (Black and White) ---
-//                         SwitchListTile(
-//                           title: const Text("Cash on Delivery (COD)"),
-//                           value: _isCodSelected,
-//
-//                           onChanged: (val) =>
-//                               setState(() => _isCodSelected = val),
-//                           activeColor: Colors.black, // Black active color
-//                           inactiveThumbColor: Colors.grey.shade300,
-//                           inactiveTrackColor: Colors.grey.shade100,
-//                         ),
-//                         if (_isLoggedIn)
-//                           SwitchListTile(
-//                             title: const Text("Use Loyalty Points"),
-//                             subtitle: Text("Available: $_loyaltyPoints points"),
-//                             value: _useLoyaltyPoints,
-//                             onChanged: (_loyaltyPoints >= 100)
-//                                 ? (val) {
-//                               setState(() {
-//                                 _useLoyaltyPoints = val;
-//                                 _recalculateFinalAmount();
-//                               });
-//                             }
-//                                 : (val) {
-//                               Fluttertoast.showToast(
-//                                 msg: "You need at least 100 loyalty points to use them.",
-//                                 backgroundColor: Colors.red,
-//                                 toastLength: Toast.LENGTH_LONG,
-//                               );
-//                             },
-//                             activeColor: Colors.black,
-//                             inactiveThumbColor: Colors.grey.shade300,
-//                             inactiveTrackColor: Colors.grey.shade100,
-//                           ),
-//
+//                         // Place Order Button
 //                         SizedBox(
 //                           width: double.infinity,
 //                           child: ElevatedButton(
-//                             onPressed: _isLoading
-//                                 ? null
-//                                 : () {
+//                             onPressed: _isLoading ? null : () {
 //                               FocusScope.of(context).unfocus();
 //                               if (_formKey.currentState!.validate()) {
 //                                 _placeOrderDirectly();
@@ -1561,18 +1588,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 //                             style: ElevatedButton.styleFrom(
 //                               backgroundColor: Colors.red,
 //                               padding: const EdgeInsets.symmetric(vertical: 16),
-//                               shape: RoundedRectangleBorder(
-//                                 borderRadius: BorderRadius.circular(8),
-//                               ),
+//                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
 //                             ),
-//                             child: const Text(
-//                               "Place Order",
-//                               style: TextStyle(
-//                                 color: Colors.white,
-//                                 fontSize: 16,
-//                                 fontWeight: FontWeight.bold,
-//                               ),
-//                             ),
+//                             child: const Text("Place Order", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
 //                           ),
 //                         )
 //                       ],
@@ -1586,120 +1604,42 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 //         if (_isLoading)
 //           Container(
 //             color: Colors.black.withOpacity(0.5),
-//             child: const Center(
-//               child: Column(
-//                 mainAxisSize: MainAxisSize.min,
-//                 children: [
-//                   CircularProgressIndicator(color: Colors.white),
-//                   SizedBox(height: 12),
-//                 ],
-//               ),
-//             ),
+//             child: const Center(child: CircularProgressIndicator(color: Colors.white)),
 //           ),
 //       ],
 //     );
 //   }
 //
-//   // --- Order Processing Logic ---
-//
 //   Future<void> _placeOrderDirectly() async {
 //     setState(() => _isLoading = true);
 //
-//     String? redeemedCode;
-//     int? redeemedPoints;
-//     double? redeemedValue;
+//     String finalDiscountCode = _customDiscountCode ?? "";
+//     double finalDiscountValue = _couponDiscountValue;
 //
-//     final prefs = await SharedPreferences.getInstance();
-//     final laravelUserJson = prefs.getString('laravelUser');
-//     final bool isLoggedIn = laravelUserJson != null;
-//
-//     if (isLoggedIn) {
-//       if (_useLoyaltyPoints && _loyaltyPoints > 0) {
-//         final redeemUri = Uri.parse('$localurl/api/points/redeem');
-//         final token = prefs.getString('laravelToken');
-//         if (token == null) {
-//           Fluttertoast.showToast(msg: "Please log in first");
-//           setState(() => _isLoading = false);
-//           return;
-//         }
-//
-//         final pointsToRedeem = (_loyaltyPoints < widget.finalAmount)
-//             ? _loyaltyPoints
-//             : widget.finalAmount.toInt();
-//
-//         try {
-//           final redeemResponse = await http.post(
-//             redeemUri,
-//             headers: {
-//               'Authorization': 'Bearer $token',
-//               'Content-Type': 'application/json',
-//             },
-//             body: json.encode({"points_to_redeem": pointsToRedeem}),
-//           );
-//
-//           if (redeemResponse.statusCode == 200) {
-//             final redeemData = json.decode(redeemResponse.body);
-//             redeemedValue = (redeemData['data']['discount_value'] as num).toDouble();
-//             redeemedCode = redeemData['data']['redemption_code'];
-//             redeemedPoints = pointsToRedeem;
-//           } else {
-//             if (kDebugMode) {
-//               print("Failed to redeem points: ${redeemResponse.body}");
-//             }
-//             Fluttertoast.showToast(msg: "Failed to redeem points");
-//             setState(() => _isLoading = false);
-//             return;
-//           }
-//         } catch (e) {
-//           if (kDebugMode) {
-//             print("Error during point redemption: $e");
-//           }
-//           Fluttertoast.showToast(msg: "Error during point redemption");
-//           setState(() => _isLoading = false);
-//           return;
-//         }
-//       }
+//     if (finalDiscountCode.isEmpty && widget.discountCode != null && widget.discountCode!.isNotEmpty) {
+//       finalDiscountCode = widget.discountCode!;
+//       finalDiscountValue = widget.originalAmount - widget.finalAmount;
 //     }
 //
 //     try {
-//       String? userId;
-//       if (isLoggedIn) {
-//         final laravelUser = json.decode(laravelUserJson!);
-//         userId = laravelUser['id'].toString();
-//       }
+//       final draftOrderId = await _createDraftOrder(finalDiscountCode, finalDiscountValue);
 //
-//       final draftOrderId = await _createDraftOrder(redeemedCode, redeemedValue);
 //       if (draftOrderId != null) {
-//         final responseBody = await _completeDraftOrder(draftOrderId, _isCodSelected);
+//         final responseBody = await _completeDraftOrder(draftOrderId);
 //         final responseData = json.decode(responseBody);
 //
 //         final shopifyOrderId = responseData['draft_order']?['order_id']?.toString() ??
 //             responseData['order']?['id']?.toString() ??
 //             draftOrderId;
 //
-//         if (isLoggedIn) {
-//           await _processOrderInLaravel(
-//             shopifyOrderId,
-//             widget.originalAmount,
-//             userId!,
-//             redeemedPoints,
-//             redeemedValue,
-//             redeemedCode,
-//           );
-//         }
-//
 //         CartService.clearCart();
-//         Fluttertoast.showToast(
-//           msg: "Order placed successfully!",
-//           backgroundColor: Colors.green,
-//         );
+//
+//         Fluttertoast.showToast(msg: "Order placed successfully!", backgroundColor: Colors.green);
 //
 //         if (mounted) {
 //           Navigator.pushAndRemoveUntil(
 //             context,
-//             MaterialPageRoute(
-//               builder: (_) => ThankYouScreen(orderNumber: shopifyOrderId),
-//             ),
+//             MaterialPageRoute(builder: (_) => ThankYouScreen(orderNumber: shopifyOrderId)),
 //                 (_) => false,
 //           );
 //         }
@@ -1711,58 +1651,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 //     }
 //   }
 //
-//   Future<void> _processOrderInLaravel(
-//       String shopifyOrderId,
-//       double originalAmount,
-//       String userId,
-//       int? redeemedPoints,
-//       double? discountApplied,
-//       String? discountCode,
-//       ) async {
-//     final prefs = await SharedPreferences.getInstance();
-//     final String? token = prefs.getString('laravelToken');
-//
-//     if (token == null) {
-//       if (kDebugMode) {
-//         print("Laravel token not found in SharedPreferences");
-//       }
-//       return;
-//     }
-//
-//     final payload = {
-//       'user_id': userId,
-//       'shopify_order_id': shopifyOrderId,
-//       'total_amount': originalAmount.toStringAsFixed(2),
-//       'status': 'paid',
-//       'points_redeemed': redeemedPoints ?? 0,
-//       'discount_applied': discountApplied ?? 0,
-//       'discount_code': discountCode ?? widget.discountCode,
-//     };
-//
-//     final uri = Uri.parse('$localurl/api/orders/process');
-//
-//     try {
-//       final response = await http.post(
-//         uri,
-//         headers: {
-//           'Content-Type': 'application/json',
-//           'Accept': 'application/json',
-//           'Authorization': 'Bearer $token',
-//         },
-//         body: json.encode(payload),
-//       );
-//
-//       if (kDebugMode && response.statusCode != 201) {
-//         print("Laravel API Error: ${response.statusCode} - ${response.body}");
-//       }
-//     } catch (e) {
-//       if (kDebugMode) {
-//         print("Error processing Laravel order: $e");
-//       }
-//     }
-//   }
-//
-//   Future<String?> _createDraftOrder(String? redeemedCode, double? redeemedValue) async {
+//   Future<String?> _createDraftOrder(String? discountCode, double? discountValue) async {
 //     final lineItems = widget.cartItems.map((product) {
 //       return {
 //         "variant_id": _extractVariantId(product.variantId),
@@ -1772,23 +1661,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 //       };
 //     }).toList();
 //
-//     List<String> orderTagsList = ["mobile-app"];
-//     if (_isCodSelected) {
-//       orderTagsList.add("COD");
-//     }
+//     List<String> orderTagsList = ["mobile-app", "COD"];
 //     final String orderTags = orderTagsList.join(', ');
-//
-//     // This uses the address string in the 'address1' field
-//     const String defaultCity = "Lahore";
-//     const String defaultCountry = "Pakistan";
-//     const String defaultZip = "54000";
-//
-//     // --- MODIFIED ---: Dynamic note logic.
-//     // final String baseNote = "Order placed via AchaMart Store Mobile App";
-//     final String userNote = _noteController.text.trim();
-//
-//     // Combine the notes if the user added one.
-//     final String finalNote = userNote;
 //
 //     Map<String, dynamic> payload = {
 //       "draft_order": {
@@ -1796,47 +1670,28 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 //         "email": _emailController.text,
 //         "shipping_address": {
 //           "first_name": _nameController.text.split(' ').first,
-//           "last_name": _nameController.text.split(' ').length > 1
-//               ? _nameController.text.split(' ').last
-//               : '',
+//           "last_name": _nameController.text.split(' ').length > 1 ? _nameController.text.split(' ').last : '',
 //           "address1": _addressController.text,
-//           "city": defaultCity,
-//           "country": defaultCountry,
-//           "zip": defaultZip,
+//           "city": "Lahore", // Defaults
+//           "country": "Pakistan",
 //           "phone": _phoneController.text
 //         },
-//         "billing_address": {
-//           "first_name": _nameController.text.split(' ').first,
-//           "last_name": _nameController.text.split(' ').length > 1
-//               ? _nameController.text.split(' ').last
-//               : '',
-//           "address1": _addressController.text,
-//           "city": defaultCity,
-//           "country": defaultCountry,
-//           "zip": defaultZip,
-//           "phone": _phoneController.text
-//         },
-//         "note": finalNote, // Use the dynamically created note
+//         "note": _noteController.text,
 //         "tags": orderTags,
 //       }
 //     };
 //
-//     if (redeemedCode != null && redeemedValue != null) {
+//     if (discountCode != null && discountCode.isNotEmpty && discountValue != null && discountValue > 0) {
 //       payload["draft_order"]["applied_discount"] = {
-//         "description": "Loyalty Points Redemption",
-//         "value": redeemedValue.toStringAsFixed(2),
+//         "description": discountCode,
+//         "value": discountValue.toStringAsFixed(2),
 //         "value_type": "fixed_amount",
-//         "amount": redeemedValue.toStringAsFixed(2),
-//         "title": redeemedCode,
-//       };
-//     } else if (widget.discountCode != null && widget.discountCode!.isNotEmpty) {
-//       payload["draft_order"]["applied_discount"] = {
-//         "title": widget.discountCode,
+//         "amount": discountValue.toStringAsFixed(2),
+//         "title": discountCode,
 //       };
 //     }
 //
-//     final uri = Uri.parse(
-//         'https://$shopifyStoreUrl_const/admin/api/$adminApiVersion_const/draft_orders.json');
+//     final uri = Uri.parse('https://$shopifyStoreUrl_const/admin/api/$adminApiVersion_const/draft_orders.json');
 //
 //     final response = await http.post(
 //       uri,
@@ -1848,40 +1703,25 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 //     );
 //
 //     if (response.statusCode == 201) {
-//       final jsonResponse = json.decode(response.body);
-//       return jsonResponse['draft_order']['id'].toString();
+//       return json.decode(response.body)['draft_order']['id'].toString();
 //     } else {
-//       throw Exception(
-//           'Failed to create draft order: ${response.statusCode} - ${response.body}');
+//       throw Exception('Failed to create draft order');
 //     }
 //   }
 //
-//   Future<String> _completeDraftOrder(String draftOrderId, bool isCod) async {
-//     final Map<String, dynamic> body = {
-//       "draft_order": {
-//         "id": draftOrderId,
-//         "payment_pending": isCod,
-//       }
-//     };
-//
+//   Future<String> _completeDraftOrder(String draftOrderId) async {
 //     final uri = Uri.parse(
-//         'https://$shopifyStoreUrl_const/admin/api/$adminApiVersion_const/draft_orders/$draftOrderId/complete.json');
-//
+//         'https://$shopifyStoreUrl_const/admin/api/$adminApiVersion_const/draft_orders/$draftOrderId/complete.json?payment_pending=true');
 //     final response = await http.put(
 //       uri,
 //       headers: {
 //         'Content-Type': 'application/json',
 //         'X-Shopify-Access-Token': adminAccessToken_const,
 //       },
-//       body: json.encode(body),
 //     );
 //
-//     if (response.statusCode == 200) {
-//       return response.body;
-//     } else {
-//       throw Exception(
-//           'Failed to complete draft order: ${response.statusCode} - ${response.body}');
-//     }
+//     if (response.statusCode == 200) return response.body;
+//     throw Exception('Failed to complete draft order');
 //   }
 //
 //   String _extractVariantId(String variantGid) {

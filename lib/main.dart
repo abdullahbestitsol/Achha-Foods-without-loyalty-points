@@ -1,3 +1,4 @@
+import 'package:achhafoods/services/shopify_service.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:achhafoods/screens/CartScreen/Cart.dart';
@@ -8,6 +9,7 @@ import 'package:achhafoods/services/DynamicContentCache.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  await ShopifyService.initToken();
   // Load all data once when app starts
   await Cart.loadCartItems();
   await Wishlist.loadWishlist();

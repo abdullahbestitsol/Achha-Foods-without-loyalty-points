@@ -5,9 +5,9 @@ import 'package:achhafoods/screens/Consts/CustomColorTheme.dart';
 import 'package:achhafoods/screens/Consts/appBar.dart';
 import 'package:achhafoods/screens/Drawer/Drawer.dart';
 import 'package:achhafoods/screens/Navigation%20Bar/NavigationBar.dart';
-import 'package:achhafoods/screens/Profile/MainScreenProfile.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'dart:math'; // Import for random password generation
 import '../Consts/CustomFloatingButton.dart';
 import '../Consts/shopify_auth_service.dart';
 
@@ -18,91 +18,110 @@ class MyAccount extends StatefulWidget {
   State<MyAccount> createState() => _MyAccountState();
 }
 
-// https://achafoods.bestitsol.com/api/register
-
 class _MyAccountState extends State<MyAccount> {
   final _formKey = GlobalKey<FormState>();
-  String firstName = '';
-  String lastName = '';
-  String email = '';
-  String password = '';
-  String confirmPassword = '';
-  String phoneNumber = '';
-  String referralCode = ''; // Optional
+
+  // Controllers allow better control over text fields
+  final TextEditingController _firstNameController = TextEditingController();
+  final TextEditingController _lastNameController = TextEditingController();
+  final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _phoneController = TextEditingController();
+  final TextEditingController _referralController = TextEditingController();
+
   bool isLoading = false;
-  bool _obscurePassword = true;
-  bool _obscureConfirmPassword = true;
+
+  @override
+  void dispose() {
+    _firstNameController.dispose();
+    _lastNameController.dispose();
+    _emailController.dispose();
+    _phoneController.dispose();
+    _referralController.dispose();
+    super.dispose();
+  }
 
   Future<void> _registerCustomer() async {
     FocusScope.of(context).unfocus();
 
     if (!_formKey.currentState!.validate()) return;
 
-    if (password != confirmPassword) {
-      Fluttertoast.showToast(
-        msg: "Passwords don't match",
-        backgroundColor: Colors.red,
-        textColor: Colors.white,
-      );
-      return;
-    }
-
     setState(() => isLoading = true);
 
-    try {
-      // 1️⃣ Check if referral code is valid (if provided)
-      if (referralCode.trim().isNotEmpty) {
-        final referralCheckUrl = Uri.parse("$localurl/api/check-referral-code");
-        final referralCheckResponse = await http.post(
-          referralCheckUrl,
-          headers: {"Content-Type": "application/json"},
-          body: jsonEncode({"referral_code": referralCode.trim()}),
-        );
+    String firstName = _firstNameController.text.trim();
+    String lastName = _lastNameController.text.trim();
+    String email = _emailController.text.trim();
+    String phoneNumber = _phoneController.text.trim();
+    String referralCode = _referralController.text.trim();
 
-        final referralCheckData = jsonDecode(referralCheckResponse.body);
-        if (referralCheckResponse.statusCode != 200 ||
-            referralCheckData["status"] != true) {
-          Fluttertoast.showToast(
-            msg: "Invalid referral code",
-            backgroundColor: Colors.red,
-            textColor: Colors.white,
+    try {
+      // ---------------------------------------------------------
+      // 1️⃣ CHECK REFERRAL CODE (Optional)
+      // ---------------------------------------------------------
+      if (referralCode.isNotEmpty) {
+        final referralCheckUrl = Uri.parse("$localurl/api/check-referral-code");
+        try {
+          final referralCheckResponse = await http.post(
+            referralCheckUrl,
+            headers: {"Content-Type": "application/json"},
+            body: jsonEncode({"referral_code": referralCode}),
           );
-          setState(() => isLoading = false);
-          return;
+
+          final referralCheckData = jsonDecode(referralCheckResponse.body);
+          if (referralCheckResponse.statusCode != 200 ||
+              referralCheckData["status"] != true) {
+            Fluttertoast.showToast(
+              msg: "Invalid referral code",
+              backgroundColor: Colors.red,
+              textColor: Colors.white,
+            );
+            setState(() => isLoading = false);
+            return;
+          }
+        } catch (e) {
+          print("Referral check error: $e");
+          // Continue or stop based on your logic. Usually stop if check fails.
         }
       }
 
-      // 2️⃣ FIRST: Try Shopify registration (to check if email exists)
+      // ---------------------------------------------------------
+      // 2️⃣ REGISTER IN SHOPIFY (Admin API)
+      // ---------------------------------------------------------
+      // We generate a complex dummy password because the Admin API requires one,
+      // but the user will actually login via OTP/OAuth, so they never need this password.
+      String dummyPassword = "Auto${_generateRandomString(8)}!";
+
       final shopifyCustomer = await ShopifyAuthService.registerCustomer(
         firstName,
         lastName,
         email,
-        password,
+        dummyPassword,
       );
 
-      // CHECK SHOPIFY RESPONSE - If not successful, stop here
+      // Check if email already exists in Shopify
       if (shopifyCustomer == null) {
-        // Shopify failed - email already exists in Shopify
         Fluttertoast.showToast(
-          msg: "Email already registered in Shopify. Please use a different email or login.",
-          backgroundColor: Colors.red,
+          msg: "Email already registered in Shopify. Please Log In.",
+          backgroundColor: Colors.orange,
           textColor: Colors.white,
         );
         setState(() => isLoading = false);
-        return; // Don't proceed to Laravel
+        return;
       }
 
-      // 3️⃣ Only proceed to Laravel if Shopify registration was successful
+      // ---------------------------------------------------------
+      // 3️⃣ REGISTER IN LARAVEL
+      // ---------------------------------------------------------
       final laravelRegisterUrl = Uri.parse("$localurl/api/register");
+
       Map<String, dynamic> requestBody = {
         "name": "$firstName $lastName",
         "email": email,
-        // "password": password,
         "phone": phoneNumber,
+        // We don't send password to Laravel as it is an OTP/OAuth user
       };
 
-      if (referralCode.trim().isNotEmpty) {
-        requestBody["referred_by"] = referralCode.trim();
+      if (referralCode.isNotEmpty) {
+        requestBody["referred_by"] = referralCode;
       }
 
       final laravelResponse = await http.post(
@@ -117,51 +136,30 @@ class _MyAccountState extends State<MyAccount> {
       final laravelData = jsonDecode(laravelResponse.body);
 
       if (laravelResponse.statusCode == 201 && laravelData["status"] == true) {
-        // Both Shopify and Laravel successful
+        // ✅ SUCCESS
         Fluttertoast.showToast(
-          msg: "Account created successfully 🎉",
+          msg: "Account created! 🎉\nPlease tap 'Log in with Shopify' to continue.",
           backgroundColor: Colors.green,
           textColor: Colors.white,
+          toastLength: Toast.LENGTH_LONG,
         );
 
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => MainScreen()),
-        );
+        // Navigate back to Login Screen so they can click the big Login button
+        if (mounted) Navigator.pop(context);
+
       } else if (laravelResponse.statusCode == 422) {
-        print('Laravel validation failed (422): ${laravelResponse.body}');
+        // ❌ VALIDATION ERROR (Laravel)
+        print('Laravel validation failed: ${laravelResponse.body}');
+        String errorMessage = "Registration failed.";
 
-        String errorMessage = "Registration failed. Please check your details.";
-
-        // Check if the detailed errors map exists
         if (laravelData["errors"] != null && laravelData["errors"] is Map) {
-          if (laravelData["errors"]["email"] != null &&
-              laravelData["errors"]["email"] is List &&
-              laravelData["errors"]["email"].isNotEmpty) {
+          if (laravelData["errors"]["email"] != null) {
             errorMessage = laravelData["errors"]["email"].first;
-          } else if (laravelData["errors"]["phone"] != null &&
-              laravelData["errors"]["phone"] is List &&
-              laravelData["errors"]["phone"].isNotEmpty) {
+          } else if (laravelData["errors"]["phone"] != null) {
             errorMessage = laravelData["errors"]["phone"].first;
-          } else {
-            for (var key in laravelData["errors"].keys) {
-              if (laravelData["errors"][key] is List &&
-                  laravelData["errors"][key].isNotEmpty) {
-                errorMessage = laravelData["errors"][key].first;
-                break;
-              }
-            }
           }
         } else if (laravelData["message"] != null) {
           errorMessage = laravelData["message"];
-        }
-
-        // IMPORTANT: If Laravel fails but Shopify succeeded, we need to delete Shopify customer
-        // Add a rollback API call to delete the Shopify user
-        if (shopifyCustomer != null) {
-          // Call your Shopify delete function here
-          // await ShopifyAuthService.deleteCustomer(shopifyCustomerId);
-          print("WARNING: Shopify user created but Laravel failed. Need rollback.");
         }
 
         Fluttertoast.showToast(
@@ -170,31 +168,30 @@ class _MyAccountState extends State<MyAccount> {
           textColor: Colors.white,
         );
       } else {
-        print('Laravel registration failed: ${laravelResponse.body}');
-
-        // IMPORTANT: If Laravel fails but Shopify succeeded, we need to delete Shopify customer
-        if (shopifyCustomer != null) {
-          // Call your Shopify delete function here
-          // await ShopifyAuthService.deleteCustomer(shopifyCustomerId);
-          print("WARNING: Shopify user created but Laravel failed. Need rollback.");
-        }
-
+        // ❌ OTHER LARAVEL ERROR
         Fluttertoast.showToast(
-          msg: laravelData["message"] ?? "Laravel registration failed",
+          msg: laravelData["message"] ?? "Registration failed in database.",
           backgroundColor: Colors.red,
           textColor: Colors.white,
         );
       }
     } catch (e) {
-      print('Error during registration: $e');
+      print('❌ Registration Exception: $e');
       Fluttertoast.showToast(
-        msg: "Error: $e",
+        msg: "An error occurred. Please check your internet.",
         backgroundColor: Colors.red,
         textColor: Colors.white,
       );
     } finally {
-      setState(() => isLoading = false);
+      if (mounted) setState(() => isLoading = false);
     }
+  }
+
+  String _generateRandomString(int length) {
+    const chars = 'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz1234567890';
+    Random rnd = Random();
+    return String.fromCharCodes(Iterable.generate(
+        length, (_) => chars.codeUnitAt(rnd.nextInt(chars.length))));
   }
 
   @override
@@ -215,7 +212,7 @@ class _MyAccountState extends State<MyAccount> {
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 decoration: BoxDecoration(
                   border: Border(
-                    bottom: BorderSide(color: Colors.grey[800]!, width: 1),
+                    bottom: BorderSide(color: Colors.grey[300]!, width: 1),
                   ),
                 ),
                 child: Text(
@@ -228,24 +225,28 @@ class _MyAccountState extends State<MyAccount> {
                 ),
               ),
               const SizedBox(height: 30),
+
+              // First Name
               _buildTextField(
+                controller: _firstNameController,
                 label: 'First Name',
-                onChanged: (val) => firstName = val,
-                validator: (val) =>
-                (val == null || val.isEmpty) ? 'Required' : null,
+                validator: (val) => (val == null || val.isEmpty) ? 'Required' : null,
               ),
               const SizedBox(height: 15),
+
+              // Last Name
               _buildTextField(
+                controller: _lastNameController,
                 label: 'Last Name',
-                onChanged: (val) => lastName = val,
-                validator: (val) =>
-                (val == null || val.isEmpty) ? 'Required' : null,
+                validator: (val) => (val == null || val.isEmpty) ? 'Required' : null,
               ),
               const SizedBox(height: 15),
+
+              // Email
               _buildTextField(
+                controller: _emailController,
                 label: 'Email',
                 keyboardType: TextInputType.emailAddress,
-                onChanged: (val) => email = val,
                 validator: (val) {
                   if (val == null || val.isEmpty) return 'Required';
                   if (!val.contains('@')) return 'Invalid email';
@@ -253,34 +254,26 @@ class _MyAccountState extends State<MyAccount> {
                 },
               ),
               const SizedBox(height: 15),
+
+              // Phone
               _buildTextField(
+                controller: _phoneController,
                 label: 'Phone Number',
-                onChanged: (val) => phoneNumber = val,
-                validator: (val) =>
-                (val == null || val.isEmpty) ? 'Required' : null,
-              ),
-              const SizedBox(height: 15),
-              _buildPasswordField(
-                label: 'Password',
-                obscureText: _obscurePassword,
-                onChanged: (val) => password = val,
-                toggleVisibility: () =>
-                    setState(() => _obscurePassword = !_obscurePassword),
-              ),
-              const SizedBox(height: 15),
-              _buildPasswordField(
-                label: 'Confirm Password',
-                obscureText: _obscureConfirmPassword,
-                onChanged: (val) => confirmPassword = val,
-                toggleVisibility: () => setState(
-                        () => _obscureConfirmPassword = !_obscureConfirmPassword),
+                keyboardType: TextInputType.phone,
+                validator: (val) => (val == null || val.isEmpty) ? 'Required' : null,
               ),
               // const SizedBox(height: 15),
+              //
+              // // Referral (Optional)
               // _buildTextField(
+              //   controller: _referralController,
               //   label: 'Referral Code (Optional)',
-              //   onChanged: (val) => referralCode = val,
+              //   keyboardType: TextInputType.text,
               // ),
+
               const SizedBox(height: 30),
+
+              // Create Button
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: CustomColorTheme.CustomPrimaryAppColor,
@@ -288,6 +281,7 @@ class _MyAccountState extends State<MyAccount> {
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),
+                  elevation: 2,
                 ),
                 onPressed: isLoading ? null : _registerCustomer,
                 child: isLoading
@@ -309,12 +303,13 @@ class _MyAccountState extends State<MyAccount> {
                 ),
               ),
               const SizedBox(height: 20),
+
+              // Back to Login
               TextButton(
                 onPressed: () => Navigator.pop(context),
                 child: const Text(
                   'Already have an account? Sign in',
-                  style:
-                  TextStyle(color: CustomColorTheme.CustomPrimaryAppColor),
+                  style: TextStyle(color: CustomColorTheme.CustomPrimaryAppColor),
                 ),
               ),
             ],
@@ -325,69 +320,45 @@ class _MyAccountState extends State<MyAccount> {
   }
 
   Widget _buildTextField({
+    required TextEditingController controller,
     required String label,
-    required Function(String) onChanged,
     String? Function(String?)? validator,
     TextInputType keyboardType = TextInputType.text,
   }) {
     return TextFormField(
+      controller: controller,
       decoration: InputDecoration(
         labelText: label,
-        labelStyle: TextStyle(color: Colors.grey[800]), // Color changed here
-        prefixIcon: const Icon(Icons.person_outline,
-            color: CustomColorTheme.CustomPrimaryAppColor),
+        labelStyle: TextStyle(color: Colors.grey[700]),
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        prefixIcon: Icon(
+          _getIconForLabel(label),
+          color: CustomColorTheme.CustomPrimaryAppColor,
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: Colors.grey[800]!),
+          borderSide: BorderSide(color: Colors.grey[300]!),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: Colors.grey[300]!),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide:
-          const BorderSide(color: CustomColorTheme.CustomPrimaryAppColor),
+          borderSide: const BorderSide(color: CustomColorTheme.CustomPrimaryAppColor),
         ),
       ),
       keyboardType: keyboardType,
       validator: validator,
-      onChanged: onChanged,
     );
   }
 
-  Widget _buildPasswordField({
-    required String label,
-    required bool obscureText,
-    required Function(String) onChanged,
-    required VoidCallback toggleVisibility,
-  }) {
-    return TextFormField(
-      decoration: InputDecoration(
-        labelText: label,
-        labelStyle: TextStyle(color: Colors.grey[800]), // Color changed here
-        prefixIcon: const Icon(Icons.lock_outline,
-            color: CustomColorTheme.CustomPrimaryAppColor),
-        suffixIcon: IconButton(
-          icon: Icon(
-            obscureText ? Icons.visibility_off : Icons.visibility,
-            color: Colors.grey[800],
-          ),
-          onPressed: toggleVisibility,
-        ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: Colors.grey[800]!),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide:
-          const BorderSide(color: CustomColorTheme.CustomPrimaryAppColor),
-        ),
-      ),
-      obscureText: obscureText,
-      validator: (value) => value == null || value.isEmpty
-          ? 'Required'
-          : value.length < 8
-          ? 'Minimum 8 characters'
-          : null,
-      onChanged: onChanged,
-    );
+  IconData _getIconForLabel(String label) {
+    if (label.contains('Email')) return Icons.email_outlined;
+    if (label.contains('Phone')) return Icons.phone;
+    if (label.contains('Referral')) return Icons.card_giftcard;
+    return Icons.person_outline;
   }
 }

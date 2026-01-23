@@ -8,7 +8,7 @@ import 'package:achhafoods/screens/Navigation%20Bar/NavigationBar.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../Consts/shopify_auth_service.dart';
 import 'OrderDetailsScreen.dart';
-import 'package:shimmer/shimmer.dart'; // 🚨 NEW IMPORT FOR SHIMMER
+import 'package:shimmer/shimmer.dart';
 
 class MyOrdersScreen extends StatefulWidget {
   const MyOrdersScreen({super.key});
@@ -35,20 +35,16 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
     });
 
     try {
-      print("Fetching orders...");
       final prefs = await SharedPreferences.getInstance();
 
-      // Get full customerData JSON string
-      final customerDataRaw = prefs.getString('customerData');
+      // Retrieve the Shopify Customer Data saved during Login
+      final customerDataRaw = prefs.getString('shopifyCustomer') ?? prefs.getString('customer');
 
       String? accessToken;
 
       if (customerDataRaw != null) {
         final customerData = jsonDecode(customerDataRaw);
         accessToken = customerData['accessToken'];
-        print("Access Token: $accessToken");
-      } else {
-        print("No customer data found in SharedPreferences.");
       }
 
       if (accessToken == null || accessToken.isEmpty) {
@@ -59,19 +55,23 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
         return;
       }
 
-      final fetchedOrders =
-      await ShopifyAuthService.getCustomerOrdersStorefront(accessToken);
+      // Call the updated Service method (uses Customer Account API)
+      final fetchedOrders = await ShopifyAuthService.getCustomerOrdersStorefront(accessToken);
 
-      setState(() {
-        _orders = fetchedOrders;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _orders = fetchedOrders;
+          _isLoading = false;
+        });
+      }
     } catch (e) {
       print("Error fetching orders: $e");
-      setState(() {
-        _errorMessage = "Failed to load orders: $e";
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _errorMessage = "Failed to load orders. Please try again.";
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -80,61 +80,38 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
       final dateTime = DateTime.parse(isoDate);
       return '${dateTime.day}/${dateTime.month}/${dateTime.year}';
     } catch (e) {
-      return isoDate; // Return original if parsing fails
+      return isoDate;
     }
   }
 
-  // 🚨 SHIMMER LOADER IMPLEMENTATION
   Widget _buildShimmerLoader() {
     return Shimmer.fromColors(
       baseColor: Colors.grey[300]!,
       highlightColor: Colors.grey[100]!,
-      child: ListView.builder(
+      child: // --- UI Mapping inside MyOrdersScreen ListView ---
+
+      ListView.builder(
         padding: const EdgeInsets.all(16.0),
-        itemCount: 5, // Show 5 placeholder items
+        itemCount: _orders.length,
         itemBuilder: (context, index) {
+          final order = _orders[index];
+
+          // Shopify GraphQL returns the order name (e.g. #1001) in the 'name' field
+          final String orderName = order['name'] ?? 'N/A';
+          final String dateStr = order['processedAt'] ?? '';
+          final String total = order['totalPrice']?['amount'] ?? '0.00';
+          final String currency = order['totalPrice']?['currencyCode'] ?? '';
+
           return Card(
-            margin: const EdgeInsets.symmetric(vertical: 8.0),
-            elevation: 2,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Order Number Placeholder
-                  Container(
-                    width: 150,
-                    height: 18,
-                    color: Colors.white,
-                  ),
-                  const SizedBox(height: 8),
-                  // Date Placeholder
-                  Container(
-                    width: 100,
-                    height: 15,
-                    color: Colors.white,
-                  ),
-                  const SizedBox(height: 4),
-                  // Total Price Placeholder
-                  Container(
-                    width: 120,
-                    height: 15,
-                    color: Colors.white,
-                  ),
-                  const SizedBox(height: 8),
-                  Align(
-                    alignment: Alignment.bottomRight,
-                    child: Container(
-                      width: 16,
-                      height: 16,
-                      color: Colors.white,
-                    ),
-                  ),
-                ],
-              ),
+            child: ListTile(
+              title: Text('Order $orderName'),
+              subtitle: Text('Date: ${_formatDate(dateStr)}\nTotal: $currency $total'),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => OrderDetailsScreen(order: order)),
+                );
+              },
             ),
           );
         },
@@ -149,69 +126,49 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
       appBar: const CustomAppBar(),
       bottomNavigationBar: const NewNavigationBar(),
       drawer: const CustomDrawer(),
-      body: _isLoading // 🚨 USE SHIMMER LOADER HERE
+      body: _isLoading
           ? _buildShimmerLoader()
           : _errorMessage != null
           ? Center(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                _errorMessage!,
-                textAlign: TextAlign.center,
-                style:
-                const TextStyle(color: Colors.red, fontSize: 16),
-              ),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: _fetchOrders,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: CustomColorTheme.CustomPrimaryAppColor,
-                ),
-                child: const Text(
-                  'Retry',
-                  style: TextStyle(color: Colors.white),
-                ),
-              ),
-            ],
-          ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
+            const SizedBox(height: 10),
+            ElevatedButton(
+              onPressed: _fetchOrders,
+              style: ElevatedButton.styleFrom(backgroundColor: CustomColorTheme.CustomPrimaryAppColor),
+              child: const Text("Retry", style: TextStyle(color: Colors.white)),
+            )
+          ],
         ),
       )
           : _orders.isEmpty
           ? Center(
-        child: Text(
-          'You have no orders yet.',
-          style: TextStyle(fontSize: 18, color: Colors.grey[600]),
-        ),
+        child: Text('You have no orders yet.',
+            style: TextStyle(fontSize: 18, color: Colors.grey[600])),
       )
           : ListView.builder(
         padding: const EdgeInsets.all(16.0),
         itemCount: _orders.length,
         itemBuilder: (context, index) {
           final order = _orders[index];
-          final orderNumber = order['orderNumber'] ?? 'N/A';
+          // Handle mapping based on what the Service returns
+          final orderNumber = order['orderNumber'] ?? order['name'] ?? 'N/A';
           final processedAt = order['processedAt'] ?? '';
-          final totalPrice =
-              order['totalPrice']?['amount'] ?? '0.00';
-          final currencyCode =
-              order['totalPrice']?['currencyCode'] ?? '';
-          // final fulfillmentStatus =
-          //     order['fulfillmentStatus'] ?? 'UNKNOWN'; // unused
+          final totalPrice = order['totalPrice']?['amount'] ?? '0.00';
+          final currencyCode = order['totalPrice']?['currencyCode'] ?? '';
 
           return Card(
             margin: const EdgeInsets.symmetric(vertical: 8.0),
             elevation: 2,
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             child: InkWell(
               onTap: () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) =>
-                        OrderDetailsScreen(order: order),
+                    builder: (context) => OrderDetailsScreen(order: order),
                   ),
                 );
               },
@@ -229,16 +186,13 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    Text('Date: ${_formatDate(processedAt)}',
-                        style: const TextStyle(fontSize: 15)),
+                    Text('Date: ${_formatDate(processedAt)}', style: const TextStyle(fontSize: 15)),
                     const SizedBox(height: 4),
-                    Text('Total: $totalPrice $currencyCode',
-                        style: const TextStyle(fontSize: 15)),
+                    Text('Total: $totalPrice $currencyCode', style: const TextStyle(fontSize: 15)),
                     const SizedBox(height: 8),
                     Align(
                       alignment: Alignment.bottomRight,
-                      child: Icon(Icons.arrow_forward_ios,
-                          size: 16, color: Colors.grey[400]),
+                      child: Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey[400]),
                     ),
                   ],
                 ),

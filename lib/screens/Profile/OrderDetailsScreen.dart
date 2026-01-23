@@ -4,6 +4,7 @@ import 'package:achhafoods/screens/Consts/appBar.dart';
 import 'package:achhafoods/screens/Drawer/Drawer.dart';
 import 'package:achhafoods/screens/Navigation%20Bar/NavigationBar.dart';
 import '../Consts/CustomFloatingButton.dart';
+
 class OrderDetailsScreen extends StatelessWidget {
   final Map<String, dynamic> order;
 
@@ -12,7 +13,7 @@ class OrderDetailsScreen extends StatelessWidget {
   String _formatDate(String isoDate) {
     try {
       final dateTime = DateTime.parse(isoDate);
-      return '${dateTime.day}/${dateTime.month}/${dateTime.year} ${dateTime.hour}:${dateTime.minute}';
+      return '${dateTime.day}/${dateTime.month}/${dateTime.year} ${dateTime.hour}:${dateTime.minute.toString().padLeft(2, '0')}';
     } catch (e) {
       return isoDate; // Return original if parsing fails
     }
@@ -20,19 +21,26 @@ class OrderDetailsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final billingAddress = order['billingAddress'] ?? {};
+    // 1. Safe Extraction of Address Data
     final shippingAddress = order['shippingAddress'] ?? {};
-    final lineItems = (order['lineItems']?['edges'] as List<dynamic>?)
-            ?.map((edge) => edge['node'] as Map<String, dynamic>)
-            .toList() ??
-        [];
+    // Note: Customer Account API line items don't always expose Billing Address directly on the order node
+    // depending on the version, so we fallback to shipping if missing or empty.
+    final billingAddress = order['billingAddress'] ?? shippingAddress;
 
-    // Extracting the first product image for display
-    // String? firstProductImageUrl;
-    // if (lineItems.isNotEmpty) {
-    //   firstProductImageUrl = lineItems[0]['variant']?['image']?['url'] ??
-    //       lineItems[0]['image']?['url'];
-    // }
+    // 2. Updated Line Item Extraction Logic (Handling 'nodes' vs 'edges')
+    List<Map<String, dynamic>> lineItems = [];
+
+    if (order['lineItems'] != null) {
+      if (order['lineItems']['nodes'] != null) {
+        // Customer Account API format
+        lineItems = List<Map<String, dynamic>>.from(order['lineItems']['nodes']);
+      } else if (order['lineItems']['edges'] != null) {
+        // Storefront API format (fallback)
+        lineItems = (order['lineItems']['edges'] as List)
+            .map((edge) => edge['node'] as Map<String, dynamic>)
+            .toList();
+      }
+    }
 
     return Scaffold(
       floatingActionButton: CustomWhatsAppFAB(),
@@ -46,44 +54,29 @@ class OrderDetailsScreen extends StatelessWidget {
           children: [
             // Order Header
             Text(
-              'Order #${order['orderNumber'] ?? 'N/A'}',
+              'Order #${order['orderNumber'] ?? order['name'] ?? 'N/A'}',
               style: const TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.bold,
                   color: CustomColorTheme.CustomPrimaryAppColor),
             ),
-            // const SizedBox(height: 16),
-
-            // Product Image (first item in order)
-            // if (firstProductImageUrl != null && firstProductImageUrl.isNotEmpty)
-            //   Center(
-            //     child: ClipRRect(
-            //       borderRadius: BorderRadius.circular(8.0),
-            //       child: Image.network(
-            //         firstProductImageUrl,
-            //         width: 150,
-            //         height: 150,
-            //         fit: BoxFit.cover,
-            //         errorBuilder: (context, error, stackTrace) =>
-            //             Icon(Icons.image_not_supported, size: 150, color: Colors.grey),
-            //       ),
-            //     ),
-            //   )
-            // else
-            //   Center(child: Icon(Icons.image, size: 150, color: Colors.grey)),
             const SizedBox(height: 20),
 
             // Basic Order Info
             _buildInfoRow(
                 'Order Date:', _formatDate(order['processedAt'] ?? 'N/A')),
-            // _buildInfoRow(
-            //     'Status:',
-            //     (order['fulfillmentStatus'] as String?)
-            //             ?.replaceAll('_', ' ')
-            //             .toLowerCase() ??
-            //         'N/A'),
+
+            // // Financial Status (Paid/Pending)
+            // if (order['financialStatus'] != null)
+            //   _buildInfoRow('Payment:', order['financialStatus']),
+            //
+            // // Fulfillment Status
+            // if (order['fulfillmentStatus'] != null)
+            //   _buildInfoRow('Status:', order['fulfillmentStatus']),
+
             _buildInfoRow('Total:',
                 '${order['totalPrice']?['amount'] ?? '0.00'} ${order['totalPrice']?['currencyCode'] ?? ''}'),
+
             const SizedBox(height: 20),
 
             // Line Items (Products)
@@ -91,43 +84,75 @@ class OrderDetailsScreen extends StatelessWidget {
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const Divider(),
             if (lineItems.isEmpty)
-              const Text('No products found for this order.')
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 10),
+                child: Text('No product details available.'),
+              )
             else
               ...lineItems.map((item) {
-                final itemTitle = item['title'] ?? 'N/A';
-                final variantTitle = item['variant']?['title'] ?? '';
+                final itemTitle = item['title'] ?? 'Product';
+                // Variant title logic differs slightly between APIs
+                final variantTitle = item['variantTitle'] ?? item['variant']?['title'] ?? '';
                 final quantity = item['quantity'] ?? 1;
-                final price = item['originalTotalPrice']?['amount'] ?? '0.00';
-                final currency =
-                    item['originalTotalPrice']?['currencyCode'] ?? '';
+
+                // Price logic
+                final priceMap = item['originalTotalPrice'] ?? item['price']; // Handle structure variance
+                final price = priceMap?['amount'] ?? '0.00';
+                final currency = priceMap?['currencyCode'] ?? '';
+
+                // Image logic
+                String? imageUrl;
+                if (item['image'] != null) {
+                  imageUrl = item['image']['url'];
+                } else if (item['variant']?['image'] != null) {
+                  imageUrl = item['variant']['image']['url'];
+                }
 
                 return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4.0),
-                  child: Column(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                          '$itemTitle ${variantTitle.isNotEmpty ? '($variantTitle)' : ''}',
-                          style: const TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.w500)),
-                      Text('Quantity: $quantity',
-                          style:
-                              TextStyle(fontSize: 14, color: Colors.grey[700])),
-                      Text('Price: $price $currency',
-                          style:
-                              TextStyle(fontSize: 14, color: Colors.grey[700])),
-                      const SizedBox(height: 8),
+                      // Product Image
+                      if (imageUrl != null)
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: Image.network(imageUrl, width: 50, height: 50, fit: BoxFit.cover),
+                        )
+                      else
+                        Container(
+                          width: 50, height: 50,
+                          color: Colors.grey[200],
+                          child: const Icon(Icons.image, color: Colors.grey),
+                        ),
+                      const SizedBox(width: 10),
+
+                      // Details
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                                '$itemTitle ${variantTitle.isNotEmpty ? '($variantTitle)' : ''}',
+                                style: const TextStyle(
+                                    fontSize: 16, fontWeight: FontWeight.w500)),
+                            const SizedBox(height: 4),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text('Qty: $quantity',
+                                    style: TextStyle(fontSize: 14, color: Colors.grey[700])),
+                                Text('$price $currency',
+                                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey[800])),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
                 );
               }),
-            const SizedBox(height: 20),
-
-            // Billing Details Section
-            const Text('Billing Details:',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const Divider(),
-            _buildAddressDetails(billingAddress),
             const SizedBox(height: 20),
 
             // Shipping Details Section
@@ -136,6 +161,15 @@ class OrderDetailsScreen extends StatelessWidget {
             const Divider(),
             _buildAddressDetails(shippingAddress),
             const SizedBox(height: 20),
+
+            // Billing Details Section (Optional - only if different or present)
+            if (billingAddress.isNotEmpty && billingAddress != shippingAddress) ...[
+              const Text('Billing Details:',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const Divider(),
+              _buildAddressDetails(billingAddress),
+              const SizedBox(height: 20),
+            ],
 
             // Back Button
             Center(
@@ -151,6 +185,7 @@ class OrderDetailsScreen extends StatelessWidget {
                     style: TextStyle(color: Colors.white)),
               ),
             ),
+            const SizedBox(height: 20),
           ],
         ),
       ),
@@ -186,33 +221,37 @@ class OrderDetailsScreen extends StatelessWidget {
       return const Text('Address information not available.',
           style: TextStyle(fontSize: 16, color: Colors.grey));
     }
+
+    // Helper to add comma if needed
+    String formatLine(String? part1, String? part2) {
+      if (part1 != null && part1.isNotEmpty && part2 != null && part2.isNotEmpty) {
+        return '$part1, $part2';
+      }
+      return part1 ?? part2 ?? '';
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (address['name'] != null)
-          Text('Name: ${address['name']}',
-              style: const TextStyle(fontSize: 16)),
+        if (address['name'] != null || address['firstName'] != null)
+          Text(address['name'] ?? '${address['firstName']} ${address['lastName']}',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+
         if (address['address1'] != null)
-          Text('Address 1: ${address['address1']}',
-              style: const TextStyle(fontSize: 16)),
-        if (address['address2'] != null)
-          Text('Address 2: ${address['address2']}',
-              style: const TextStyle(fontSize: 16)),
-        if (address['city'] != null)
-          Text('City: ${address['city']}',
-              style: const TextStyle(fontSize: 16)),
-        if (address['province'] != null)
-          Text('Province: ${address['province']}',
-              style: const TextStyle(fontSize: 16)),
-        if (address['zip'] != null)
-          Text('Postal Code: ${address['zip']}',
-              style: const TextStyle(fontSize: 16)),
-        if (address['country'] != null)
-          Text('Country: ${address['country']}',
-              style: const TextStyle(fontSize: 16)),
+          Text(address['address1'], style: const TextStyle(fontSize: 16)),
+
+        if (address['address2'] != null && address['address2'].toString().isNotEmpty)
+          Text(address['address2'], style: const TextStyle(fontSize: 16)),
+
+        Text(formatLine(address['city'], address['province']), style: const TextStyle(fontSize: 16)),
+
+        Text(formatLine(address['country'], address['zip']), style: const TextStyle(fontSize: 16)),
+
         if (address['phone'] != null)
-          Text('Phone: ${address['phone']}',
-              style: const TextStyle(fontSize: 16)),
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text('Phone: ${address['phone']}', style: const TextStyle(fontSize: 16, color: Colors.grey)),
+          ),
       ],
     );
   }
