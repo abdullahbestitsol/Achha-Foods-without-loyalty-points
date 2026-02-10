@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "155163072201",
+    "project_id": "achha-emart",
+    "storage_bucket": "achha-emart.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:155163072201:android:8f9938da14bf7cee1c5f18",
+        "android_client_info": {
+          "package_name": "com.achhafoods.achhafoods"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBt0g-_84rgG6C0pxRTSlltY238ntXgyKE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

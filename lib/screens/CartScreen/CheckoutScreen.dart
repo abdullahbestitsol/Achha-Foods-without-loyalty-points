@@ -37,6 +37,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _addressController = TextEditingController();
+  final TextEditingController _cityController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _discountCodeController = TextEditingController();
@@ -76,6 +77,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   void dispose() {
     _emailController.dispose();
     _addressController.dispose();
+    _cityController.dispose();
     _phoneController.dispose();
     _nameController.dispose();
     _discountCodeController.dispose();
@@ -184,20 +186,16 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   }
 
   void _recalculateFinalAmount() {
-    // Access provider inside the method
     final dynamicCache = Provider.of<DynamicContentCache>(context, listen: false);
 
     setState(() {
       double discountToApply = _couponDiscountValue.clamp(0.0, widget.originalAmount);
       double subTotal = widget.originalAmount - discountToApply;
 
-      // 1. Get the dynamic threshold from cache (e.g., "850")
-      // If cache is empty or invalid, it defaults to 850.0
       double freeDeliveryThreshold = double.tryParse(dynamicCache.getDeliveryPrize() ?? '') ?? 850.0;
 
-      // 2. Use the dynamic threshold to decide if we apply the static 200 charge
       if (subTotal < freeDeliveryThreshold) {
-        _deliveryCharges = 200.0; // Static charge
+        _deliveryCharges = 200.0;
       } else {
         _deliveryCharges = 0.0;
       }
@@ -232,7 +230,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         "shipping_address": {
           "first_name": _nameController.text,
           "address1": _addressController.text,
-          "city": "Lahore",
+          "city": _cityController.text,
           "country": "Pakistan",
           "phone": _phoneController.text
         },
@@ -269,6 +267,26 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     } else {
       return null;
     }
+  }
+
+  // --- Helper to keep code clean for the specific Black Styling ---
+  InputDecoration _buildBlackDecoration(String label) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: const TextStyle(color: Colors.black),
+      hintStyle: const TextStyle(color: Colors.black),
+      hintText: label, // Setting hint same as label for clarity
+      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+      border: const OutlineInputBorder(
+        borderSide: BorderSide(color: Colors.black),
+      ),
+      enabledBorder: const OutlineInputBorder(
+        borderSide: BorderSide(color: Colors.black),
+      ),
+      focusedBorder: const OutlineInputBorder(
+        borderSide: BorderSide(color: Colors.black, width: 2.0),
+      ),
+    );
   }
 
   @override
@@ -365,7 +383,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                                   Expanded(
                                     child: TextFormField(
                                       controller: _couponCodeController,
-                                      decoration: const InputDecoration(hintText: "Enter code", border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 10)),
+                                      cursorColor: Colors.black, // BLACK CURSOR
+                                      decoration: _buildBlackDecoration("Enter code"), // BLACK STYLING
                                       enabled: _customDiscountCode == null,
                                     ),
                                   ),
@@ -382,10 +401,11 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                         ),
                         const SizedBox(height: 20),
 
-                        // --- REQUIRED FIELD: NAME ---
+                        // --- NAME ---
                         TextFormField(
                           controller: _nameController,
-                          decoration: const InputDecoration(labelText: "Full Name*", border: OutlineInputBorder()),
+                          cursorColor: Colors.black, // BLACK CURSOR
+                          decoration: _buildBlackDecoration("Full Name*"), // BLACK STYLING
                           validator: (v) {
                             if (v == null || v.trim().isEmpty) return "Full Name is required";
                             return null;
@@ -393,11 +413,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                         ),
                         const SizedBox(height: 12),
 
-                        // --- REQUIRED FIELD: EMAIL ---
+                        // --- EMAIL ---
                         TextFormField(
                           controller: _emailController,
                           keyboardType: TextInputType.emailAddress,
-                          decoration: const InputDecoration(labelText: "Email Address*", border: OutlineInputBorder()),
+                          cursorColor: Colors.black, // BLACK CURSOR
+                          decoration: _buildBlackDecoration("Email Address*"), // BLACK STYLING
                           validator: (v) {
                             if (v == null || v.trim().isEmpty) return "Email is required";
                             if (!RegExp(r"^[a-zA-Z0-9.a-zA-Z0-9.!#$%&'*+-/=?^_`{|}~]+@[a-zA-Z0-9]+\.[a-zA-Z]+").hasMatch(v)) {
@@ -408,11 +429,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                         ),
                         const SizedBox(height: 12),
 
-                        // --- REQUIRED FIELD: PHONE ---
+                        // --- PHONE ---
                         TextFormField(
                           controller: _phoneController,
                           keyboardType: TextInputType.phone,
-                          decoration: const InputDecoration(labelText: "Phone Number*", border: OutlineInputBorder()),
+                          cursorColor: Colors.black, // BLACK CURSOR
+                          decoration: _buildBlackDecoration("Phone Number*"), // BLACK STYLING
                           validator: (v) {
                             if (v == null || v.trim().isEmpty) return "Phone number is required";
                             if (v.trim().length < 7) return "Please enter a valid phone number";
@@ -423,22 +445,19 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
                         if (_isLoggedIn && _savedAddresses.isNotEmpty)
                           DropdownButtonFormField<String>(
-                            isExpanded: true, // 1. Allow the dropdown to fill the width
+                            isExpanded: true,
                             value: _selectedAddressKey,
-                            decoration: const InputDecoration(
-                              labelText: "Select Saved Address",
-                              border: OutlineInputBorder(),
-                            ),
+                            // Apply black styling to dropdown as well
+                            decoration: _buildBlackDecoration("Select Saved Address"),
                             items: [
                               ..._savedAddresses.map((addr) => DropdownMenuItem(
                                 value: addr['label'],
-                                // 2. Wrap the Text in a Row + Expanded to force constraints
                                 child: Row(
                                   children: [
                                     Expanded(
                                       child: Text(
                                         addr['address']!,
-                                        overflow: TextOverflow.ellipsis, // 'ellipsis' is usually better for UX than 'clip'
+                                        overflow: TextOverflow.ellipsis,
                                         maxLines: 1,
                                       ),
                                     ),
@@ -457,16 +476,18 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                                   _addressController.text = _savedAddresses.firstWhere((e) => e['label'] == val)['address']!;
                                 } else {
                                   _addressController.clear();
+                                  _cityController.clear();
                                 }
                               });
                             },
                           ),
                         const SizedBox(height: 12),
 
-                        // --- REQUIRED FIELD: ADDRESS ---
+                        // --- ADDRESS ---
                         TextFormField(
                           controller: _addressController,
-                          decoration: const InputDecoration(labelText: "Shipping Address Details*", border: OutlineInputBorder()),
+                          cursorColor: Colors.black, // BLACK CURSOR
+                          decoration: _buildBlackDecoration("Shipping Address Details (House #, Street)*"), // BLACK STYLING
                           maxLines: 2,
                           enabled: _selectedAddressKey == 'new_address_option' || !_isLoggedIn,
                           validator: (v) {
@@ -475,13 +496,48 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           },
                         ),
 
+                        // --- CITY ---
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          controller: _cityController,
+                          cursorColor: Colors.black, // BLACK CURSOR
+                          decoration: _buildBlackDecoration("City*"), // BLACK STYLING
+                          validator: (v) {
+                            if (v == null || v.trim().isEmpty) return "City is required";
+                            return null;
+                          },
+                        ),
+
+                        // --- COUNTRY (STATIC) ---
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          initialValue: "Pakistan",
+                          readOnly: true,
+                          cursorColor: Colors.black,
+                          // Custom decoration for the static field (Grey fill + Black Border)
+                          decoration: InputDecoration(
+                            labelText: "Country",
+                            labelStyle: const TextStyle(color: Colors.black),
+                            filled: true,
+                            fillColor: Colors.grey.shade200,
+                            border: const OutlineInputBorder(
+                              borderSide: BorderSide(color: Colors.black),
+                            ),
+                            enabledBorder: const OutlineInputBorder(
+                              borderSide: BorderSide(color: Colors.black),
+                            ),
+                            focusedBorder: const OutlineInputBorder(
+                              borderSide: BorderSide(color: Colors.black),
+                            ),
+                          ),
+                        ),
+
                         const SizedBox(height: 12),
                         TextFormField(
                           controller: _noteController,
-                          decoration: const InputDecoration(
-                            labelText: "Order Notes (Optional)",
-                            border: OutlineInputBorder(),
-                            alignLabelWithHint: true,
+                          cursorColor: Colors.black, // BLACK CURSOR
+                          decoration: _buildBlackDecoration("Order Notes (Optional)").copyWith(
+                            alignLabelWithHint: true, // Specific override for notes
                           ),
                           maxLines: 3,
                         ),
@@ -492,7 +548,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           width: double.infinity,
                           child: ElevatedButton(
                             onPressed: _isLoading ? null : () {
-                              // Validates all fields using the Form key
                               if (_formKey.currentState!.validate()) {
                                 _placeOrderDirectly();
                               } else {
@@ -546,6 +601,556 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     throw Exception("Completion failed");
   }
 }
+
+
+// import 'package:flutter/material.dart';
+// import 'package:fluttertoast/fluttertoast.dart';
+// import 'package:achhafoods/screens/Consts/CustomColorTheme.dart';
+// import 'package:achhafoods/screens/Consts/appBar.dart';
+// import 'package:achhafoods/screens/Consts/conts.dart';
+// import 'package:achhafoods/screens/Drawer/Drawer.dart';
+// import 'package:achhafoods/screens/Navigation%20Bar/NavigationBar.dart';
+// import 'package:http/http.dart' as http;
+// import 'dart:convert';
+// import 'package:flutter/foundation.dart';
+// import 'package:achhafoods/screens/CartScreen/ThankYouScreen.dart';
+// import 'package:provider/provider.dart';
+// import 'package:shared_preferences/shared_preferences.dart';
+// import '../../services/CartServices.dart';
+// import '../../services/DynamicContentCache.dart';
+// import '../Consts/shopify_auth_service.dart';
+//
+// class CheckoutScreen extends StatefulWidget {
+//   final List cartItems;
+//   final double originalAmount;
+//   final double finalAmount;
+//   final String? discountCode;
+//
+//   const CheckoutScreen({
+//     super.key,
+//     required this.cartItems,
+//     required this.finalAmount,
+//     required this.originalAmount,
+//     this.discountCode,
+//   });
+//
+//   @override
+//   State<CheckoutScreen> createState() => _CheckoutScreenState();
+// }
+//
+// class _CheckoutScreenState extends State<CheckoutScreen> {
+//   final _formKey = GlobalKey<FormState>();
+//   final TextEditingController _emailController = TextEditingController();
+//   final TextEditingController _addressController = TextEditingController();
+//   final TextEditingController _phoneController = TextEditingController();
+//   final TextEditingController _nameController = TextEditingController();
+//   final TextEditingController _discountCodeController = TextEditingController();
+//   final TextEditingController _noteController = TextEditingController();
+//   final TextEditingController _couponCodeController = TextEditingController();
+//   String? _customDiscountCode;
+//   double _couponDiscountValue = 0.0;
+//   double _deliveryCharges = 0.0;
+//
+//   Map<String, dynamic>? customer;
+//   bool _isLoading = false;
+//   bool _isLoggedIn = false;
+//
+//   late double _finalAmount;
+//   bool _discountApplied = false;
+//
+//   final List<Map<String, String>> _savedAddresses = [];
+//   String? _selectedAddressKey;
+//
+//   @override
+//   void initState() {
+//     super.initState();
+//     _checkLoginStatusAndLoadInfo();
+//
+//     if (widget.discountCode != null && widget.discountCode!.isNotEmpty) {
+//       _discountCodeController.text = widget.discountCode!;
+//       _customDiscountCode = widget.discountCode;
+//       if (widget.originalAmount > widget.finalAmount) {
+//         _couponDiscountValue = widget.originalAmount - widget.finalAmount;
+//       }
+//     }
+//
+//     _recalculateFinalAmount();
+//   }
+//
+//   @override
+//   void dispose() {
+//     _emailController.dispose();
+//     _addressController.dispose();
+//     _phoneController.dispose();
+//     _nameController.dispose();
+//     _discountCodeController.dispose();
+//     _noteController.dispose();
+//     _couponCodeController.dispose();
+//     super.dispose();
+//   }
+//
+//   Future<void> _checkLoginStatusAndLoadInfo() async {
+//     final prefs = await SharedPreferences.getInstance();
+//     final customerJson = prefs.getString('shopifyCustomer') ?? prefs.getString('customer');
+//
+//     if (customerJson != null) {
+//       setState(() => _isLoggedIn = true);
+//       _loadCustomerInfoFromLocal(customerJson);
+//     } else {
+//       setState(() {
+//         _isLoggedIn = false;
+//         _selectedAddressKey = 'new_address_option';
+//       });
+//     }
+//   }
+//
+//   void _loadCustomerInfoFromLocal(String jsonString) {
+//     try {
+//       final data = json.decode(jsonString);
+//       final cust = data['customer'];
+//
+//       if (cust != null) {
+//         _emailController.text = cust['email'] ?? '';
+//         _nameController.text = '${cust['firstName'] ?? ''} ${cust['lastName'] ?? ''}'.trim();
+//         _phoneController.text = cust['phone'] ?? '';
+//
+//         List<dynamic> addresses = [];
+//         if (cust['addresses'] != null) {
+//           addresses = (cust['addresses'] is List) ? cust['addresses'] : (cust['addresses']['nodes'] ?? []);
+//         }
+//
+//         _savedAddresses.clear();
+//         for (var addr in addresses) {
+//           List<String> parts = [];
+//           if (addr['address1'] != null) parts.add(addr['address1']);
+//           if (addr['city'] != null) parts.add(addr['city']);
+//           if (addr['zip'] != null) parts.add(addr['zip']);
+//           if (addr['country'] != null) parts.add(addr['country']);
+//
+//           String fullStr = parts.join(', ');
+//           if (fullStr.isNotEmpty) {
+//             _savedAddresses.add({'label': addr['id']?.toString() ?? addr['address1'], 'address': fullStr});
+//           }
+//         }
+//
+//         setState(() {
+//           if (_savedAddresses.isNotEmpty) {
+//             _selectedAddressKey = _savedAddresses.first['label'];
+//             _addressController.text = _savedAddresses.first['address']!;
+//           } else {
+//             _selectedAddressKey = 'new_address_option';
+//           }
+//         });
+//       }
+//     } catch (e) {
+//       if (kDebugMode) print("Error parsing customer data: $e");
+//     }
+//   }
+//
+//   Future<void> _checkCouponValidity() async {
+//     final couponCode = _couponCodeController.text.trim();
+//     if (couponCode.isEmpty) {
+//       Fluttertoast.showToast(msg: "Please enter a coupon code.");
+//       return;
+//     }
+//
+//     setState(() => _isLoading = true);
+//
+//     try {
+//       final validationResult = await ShopifyAuthService.validateShopifyDiscountCode(couponCode);
+//
+//       if (validationResult['valid'] == true) {
+//         final double value = (validationResult['value'] as num).toDouble();
+//         final String type = validationResult['value_type'] as String;
+//
+//         double calculatedDiscount;
+//         if (type == 'percentage') {
+//           calculatedDiscount = widget.originalAmount * (value / 100);
+//         } else {
+//           calculatedDiscount = value;
+//         }
+//
+//         setState(() {
+//           _customDiscountCode = couponCode;
+//           _couponDiscountValue = calculatedDiscount;
+//           _discountCodeController.text = couponCode;
+//           _recalculateFinalAmount();
+//         });
+//
+//         Fluttertoast.showToast(msg: "Coupon Applied!", backgroundColor: Colors.green);
+//       } else {
+//         Fluttertoast.showToast(msg: validationResult['message'] ?? "Invalid code", backgroundColor: Colors.red);
+//       }
+//     } catch (e) {
+//       Fluttertoast.showToast(msg: "Error validating coupon");
+//     } finally {
+//       setState(() => _isLoading = false);
+//     }
+//   }
+//
+//   void _recalculateFinalAmount() {
+//     // Access provider inside the method
+//     final dynamicCache = Provider.of<DynamicContentCache>(context, listen: false);
+//
+//     setState(() {
+//       double discountToApply = _couponDiscountValue.clamp(0.0, widget.originalAmount);
+//       double subTotal = widget.originalAmount - discountToApply;
+//
+//       // 1. Get the dynamic threshold from cache (e.g., "850")
+//       // If cache is empty or invalid, it defaults to 850.0
+//       double freeDeliveryThreshold = double.tryParse(dynamicCache.getDeliveryPrize() ?? '') ?? 850.0;
+//
+//       // 2. Use the dynamic threshold to decide if we apply the static 200 charge
+//       if (subTotal < freeDeliveryThreshold) {
+//         _deliveryCharges = 200.0; // Static charge
+//       } else {
+//         _deliveryCharges = 0.0;
+//       }
+//
+//       _finalAmount = subTotal + _deliveryCharges;
+//       _discountApplied = discountToApply > 0;
+//     });
+//   }
+//
+//   void _removeCoupon() {
+//     setState(() {
+//       _couponCodeController.clear();
+//       _customDiscountCode = null;
+//       _couponDiscountValue = 0.0;
+//       _discountCodeController.clear();
+//       _recalculateFinalAmount();
+//     });
+//     Fluttertoast.showToast(msg: "Coupon removed");
+//   }
+//
+//   Future<String?> _createDraftOrder(String? code, double discount) async {
+//     final lineItems = widget.cartItems.map((p) => {
+//       "variant_id": p.variantId.split('/').last,
+//       "quantity": p.quantity,
+//     }).toList();
+//
+//     Map<String, dynamic> payload = {
+//       "draft_order": {
+//         "line_items": lineItems,
+//         "email": _emailController.text,
+//         "note": _noteController.text,
+//         "shipping_address": {
+//           "first_name": _nameController.text,
+//           "address1": _addressController.text,
+//           "city": "Lahore",
+//           "country": "Pakistan",
+//           "phone": _phoneController.text
+//         },
+//         "use_customer_default_address": false,
+//         "tags": "mobile-app, COD",
+//         "shipping_line": {
+//           "title": _deliveryCharges > 0 ? "Standard Delivery" : "Free Delivery",
+//           "price": _deliveryCharges.toStringAsFixed(2),
+//           "code": _deliveryCharges > 0 ? "STD" : "FREE"
+//         }
+//       }
+//     };
+//
+//     if (code != null && discount > 0) {
+//       payload["draft_order"]["applied_discount"] = {
+//         "description": "Coupon: $code",
+//         "value": discount.toStringAsFixed(2),
+//         "value_type": "fixed_amount",
+//         "title": code
+//       };
+//     }
+//
+//     final response = await http.post(
+//       Uri.parse('https://$shopifyStoreUrl_const/admin/api/$adminApiVersion_const/draft_orders.json'),
+//       headers: {
+//         'Content-Type': 'application/json',
+//         'X-Shopify-Access-Token': adminAccessToken_const
+//       },
+//       body: json.encode(payload),
+//     );
+//
+//     if (response.statusCode == 201) {
+//       return json.decode(response.body)['draft_order']['id'].toString();
+//     } else {
+//       return null;
+//     }
+//   }
+//
+//   @override
+//   Widget build(BuildContext context) {
+//     double displayDiscountValue = _discountApplied ? _couponDiscountValue : 0.0;
+//
+//     return Stack(
+//       children: [
+//         Scaffold(
+//           appBar: const CustomAppBar(),
+//           drawer: const CustomDrawer(),
+//           bottomNavigationBar: const NewNavigationBar(),
+//           body: Column(
+//             children: [
+//               Container(
+//                 width: double.infinity,
+//                 color: CustomColorTheme.CustomPrimaryAppColor,
+//                 padding: const EdgeInsets.symmetric(vertical: 14),
+//                 alignment: Alignment.center,
+//                 child: const Text("Checkout", style: TextStyle(fontSize: 20, color: Colors.white, fontWeight: FontWeight.bold)),
+//               ),
+//               Expanded(
+//                 child: SingleChildScrollView(
+//                   padding: const EdgeInsets.all(16),
+//                   child: Form(
+//                     key: _formKey,
+//                     child: Column(
+//                       crossAxisAlignment: CrossAxisAlignment.start,
+//                       children: [
+//                         const Text("Order Summary:", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+//                         const SizedBox(height: 8),
+//                         ...widget.cartItems.map((product) => Padding(
+//                           padding: const EdgeInsets.symmetric(vertical: 2),
+//                           child: Row(
+//                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+//                             children: [
+//                               Flexible(child: Text("${product.title} (x${product.quantity})")),
+//                               Text("Rs. ${(product.price * product.quantity).toStringAsFixed(2)}"),
+//                             ],
+//                           ),
+//                         )),
+//
+//                         if (_discountApplied)
+//                           Padding(
+//                             padding: const EdgeInsets.only(top: 8.0),
+//                             child: Row(
+//                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
+//                               children: [
+//                                 Text("Discount (${_discountCodeController.text}):", style: TextStyle(color: Colors.green.shade700, fontWeight: FontWeight.bold)),
+//                                 Text("- Rs. ${displayDiscountValue.toStringAsFixed(2)}", style: TextStyle(color: Colors.green.shade700, fontWeight: FontWeight.bold)),
+//                               ],
+//                             ),
+//                           ),
+//
+//                         Padding(
+//                           padding: const EdgeInsets.only(top: 8.0),
+//                           child: Row(
+//                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+//                             children: [
+//                               const Text("Delivery Charges:", style: TextStyle(fontWeight: FontWeight.w500)),
+//                               Text(
+//                                 _deliveryCharges > 0
+//                                     ? "Rs. ${_deliveryCharges.toStringAsFixed(2)}"
+//                                     : "Free",
+//                                 style: TextStyle(
+//                                     fontWeight: FontWeight.bold,
+//                                     color: _deliveryCharges > 0 ? Colors.black : Colors.green
+//                                 ),
+//                               ),
+//                             ],
+//                           ),
+//                         ),
+//
+//                         const Divider(),
+//                         Row(
+//                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
+//                           children: [
+//                             const Text("Grand Total:", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+//                             Text("Rs. ${_finalAmount.toStringAsFixed(2)}", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+//                           ],
+//                         ),
+//                         const SizedBox(height: 20),
+//
+//                         Container(
+//                           padding: const EdgeInsets.all(12),
+//                           decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
+//                           child: Column(
+//                             crossAxisAlignment: CrossAxisAlignment.start,
+//                             children: [
+//                               const Text("Apply Coupon", style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+//                               const SizedBox(height: 8),
+//                               Row(
+//                                 children: [
+//                                   Expanded(
+//                                     child: TextFormField(
+//                                       controller: _couponCodeController,
+//                                       decoration: const InputDecoration(hintText: "Enter code", border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 10)),
+//                                       enabled: _customDiscountCode == null,
+//                                     ),
+//                                   ),
+//                                   const SizedBox(width: 8),
+//                                   ElevatedButton(
+//                                     onPressed: _isLoading ? null : (_customDiscountCode != null ? _removeCoupon : _checkCouponValidity),
+//                                     style: ElevatedButton.styleFrom(backgroundColor: _customDiscountCode != null ? Colors.red : Colors.black),
+//                                     child: Text(_customDiscountCode != null ? "Remove" : "Apply", style: const TextStyle(color: Colors.white)),
+//                                   ),
+//                                 ],
+//                               ),
+//                             ],
+//                           ),
+//                         ),
+//                         const SizedBox(height: 20),
+//
+//                         // --- REQUIRED FIELD: NAME ---
+//                         TextFormField(
+//                           controller: _nameController,
+//                           decoration: const InputDecoration(labelText: "Full Name*", border: OutlineInputBorder()),
+//                           validator: (v) {
+//                             if (v == null || v.trim().isEmpty) return "Full Name is required";
+//                             return null;
+//                           },
+//                         ),
+//                         const SizedBox(height: 12),
+//
+//                         // --- REQUIRED FIELD: EMAIL ---
+//                         TextFormField(
+//                           controller: _emailController,
+//                           keyboardType: TextInputType.emailAddress,
+//                           decoration: const InputDecoration(labelText: "Email Address*", border: OutlineInputBorder()),
+//                           validator: (v) {
+//                             if (v == null || v.trim().isEmpty) return "Email is required";
+//                             if (!RegExp(r"^[a-zA-Z0-9.a-zA-Z0-9.!#$%&'*+-/=?^_`{|}~]+@[a-zA-Z0-9]+\.[a-zA-Z]+").hasMatch(v)) {
+//                               return "Please enter a valid email address";
+//                             }
+//                             return null;
+//                           },
+//                         ),
+//                         const SizedBox(height: 12),
+//
+//                         // --- REQUIRED FIELD: PHONE ---
+//                         TextFormField(
+//                           controller: _phoneController,
+//                           keyboardType: TextInputType.phone,
+//                           decoration: const InputDecoration(labelText: "Phone Number*", border: OutlineInputBorder()),
+//                           validator: (v) {
+//                             if (v == null || v.trim().isEmpty) return "Phone number is required";
+//                             if (v.trim().length < 7) return "Please enter a valid phone number";
+//                             return null;
+//                           },
+//                         ),
+//                         const SizedBox(height: 12),
+//
+//                         if (_isLoggedIn && _savedAddresses.isNotEmpty)
+//                           DropdownButtonFormField<String>(
+//                             isExpanded: true, // 1. Allow the dropdown to fill the width
+//                             value: _selectedAddressKey,
+//                             decoration: const InputDecoration(
+//                               labelText: "Select Saved Address",
+//                               border: OutlineInputBorder(),
+//                             ),
+//                             items: [
+//                               ..._savedAddresses.map((addr) => DropdownMenuItem(
+//                                 value: addr['label'],
+//                                 // 2. Wrap the Text in a Row + Expanded to force constraints
+//                                 child: Row(
+//                                   children: [
+//                                     Expanded(
+//                                       child: Text(
+//                                         addr['address']!,
+//                                         overflow: TextOverflow.ellipsis, // 'ellipsis' is usually better for UX than 'clip'
+//                                         maxLines: 1,
+//                                       ),
+//                                     ),
+//                                   ],
+//                                 ),
+//                               )),
+//                               const DropdownMenuItem(
+//                                 value: 'new_address_option',
+//                                 child: Text("Enter a new address"),
+//                               ),
+//                             ],
+//                             onChanged: (val) {
+//                               setState(() {
+//                                 _selectedAddressKey = val;
+//                                 if (val != 'new_address_option') {
+//                                   _addressController.text = _savedAddresses.firstWhere((e) => e['label'] == val)['address']!;
+//                                 } else {
+//                                   _addressController.clear();
+//                                 }
+//                               });
+//                             },
+//                           ),
+//                         const SizedBox(height: 12),
+//
+//                         // --- REQUIRED FIELD: ADDRESS ---
+//                         TextFormField(
+//                           controller: _addressController,
+//                           decoration: const InputDecoration(labelText: "Shipping Address Details*", border: OutlineInputBorder()),
+//                           maxLines: 2,
+//                           enabled: _selectedAddressKey == 'new_address_option' || !_isLoggedIn,
+//                           validator: (v) {
+//                             if (v == null || v.trim().isEmpty) return "Shipping address is required";
+//                             return null;
+//                           },
+//                         ),
+//
+//                         const SizedBox(height: 12),
+//                         TextFormField(
+//                           controller: _noteController,
+//                           decoration: const InputDecoration(
+//                             labelText: "Order Notes (Optional)",
+//                             border: OutlineInputBorder(),
+//                             alignLabelWithHint: true,
+//                           ),
+//                           maxLines: 3,
+//                         ),
+//
+//                         const SizedBox(height: 20),
+//
+//                         SizedBox(
+//                           width: double.infinity,
+//                           child: ElevatedButton(
+//                             onPressed: _isLoading ? null : () {
+//                               // Validates all fields using the Form key
+//                               if (_formKey.currentState!.validate()) {
+//                                 _placeOrderDirectly();
+//                               } else {
+//                                 Fluttertoast.showToast(msg: "Please fill all required fields correctly");
+//                               }
+//                             },
+//                             style: ElevatedButton.styleFrom(backgroundColor: Colors.red, padding: const EdgeInsets.symmetric(vertical: 16)),
+//                             child: const Text("Place Order", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+//                           ),
+//                         )
+//                       ],
+//                     ),
+//                   ),
+//                 ),
+//               ),
+//             ],
+//           ),
+//         ),
+//         if (_isLoading) const Center(child: CircularProgressIndicator()),
+//       ],
+//     );
+//   }
+//
+//   Future<void> _placeOrderDirectly() async {
+//     setState(() => _isLoading = true);
+//     try {
+//       final draftId = await _createDraftOrder(_customDiscountCode, _couponDiscountValue);
+//       if (draftId != null) {
+//         final response = await _completeDraftOrder(draftId);
+//         final data = json.decode(response);
+//         final orderId = data['draft_order']?['order_id']?.toString() ?? draftId;
+//
+//         CartService.clearCart();
+//         Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => ThankYouScreen(orderNumber: orderId)), (r) => false);
+//       } else {
+//         Fluttertoast.showToast(msg: "Failed to create order. Please try again.");
+//       }
+//     } catch (e) {
+//       Fluttertoast.showToast(msg: "Checkout Error: $e");
+//     } finally {
+//       setState(() => _isLoading = false);
+//     }
+//   }
+//
+//   Future<String> _completeDraftOrder(String id) async {
+//     final response = await http.put(
+//       Uri.parse('https://$shopifyStoreUrl_const/admin/api/$adminApiVersion_const/draft_orders/$id/complete.json?payment_pending=true'),
+//       headers: {'Content-Type': 'application/json', 'X-Shopify-Access-Token': adminAccessToken_const},
+//     );
+//     if (response.statusCode == 200) return response.body;
+//     throw Exception("Completion failed");
+//   }
+// }
 
 // import 'package:flutter/material.dart';
 // import 'package:fluttertoast/fluttertoast.dart';
